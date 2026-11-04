@@ -65,3 +65,12 @@ exception. System macOS frameworks remain OS-provided.
 
 Primary sources: https://github.com/python/cpython/blob/v3.12.13/LICENSE and
 https://github.com/facebook/zstd/blob/v1.5.7/LICENSE.
+
+## Full Disk Access onboarding reference
+
+https://github.com/inket/FullDiskAccess documents native metadata probing to have
+macOS register an unchecked Full Disk Access entry. The launcher uses a native protected-path probe; it opens and closes the system
+TCC file without reading its contents or changing the TCC database. The actual
+WeChat directory is checked independently. Actual WeChat data access is verified separately.
+System registration behavior still depends on macOS, and permission is enabled
+only by the user.

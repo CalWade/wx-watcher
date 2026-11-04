@@ -29,6 +29,8 @@ macOS 本地消息助手：图形配置向导、菜单栏应用、独立微信�
 5. 选择飞书接收群，试发并回读。
 6. 开始监控，通过菜单栏管理后台运行。
 
+这是当前首个开源预发布版本，真实验证范围见 [验收记录](docs/VALIDATION.md)。
+
 首次扫描建立历史基线，后续处理新增事件。支持连续消息合并、持久化任务与调用上限。
 模型失败或投递结果不确定时进入待核对状态，避免无限自动重试。
 
@@ -56,7 +58,7 @@ flowchart LR
 
 | 项目 | 当前范围 |
 | --- | --- |
-| 应用平台 | macOS 14+ / Apple Silicon；以实际兼容表为准 |
+| 应用平台 | Apple Silicon；本机发布的 0.2.0 安装包要求 macOS 27.0+ |
 | 真实已验证组合 | macOS 27.0、微信 4.1.13（269630）、DSH NEXT 2.0.19-next |
 | 自动取钥 | 仅放行已验证微信构建；其他环境可先导入密钥验证读取 |
 | 数据库 | 当前 Mac 微信 SQLCipher4 布局，文本及部分引用/卡片文本 |
@@ -77,6 +79,7 @@ git clone https://github.com/CalWade/wx-watcher.git
 cd wx-watcher
 uv sync --frozen
 swift build --package-path native -c release
+codesign --force --sign - native/.build/release/wx-keytool
 uv run wx-watcher desktop
 ```
 
@@ -90,7 +93,9 @@ uv sync --frozen --group build
 uv run python scripts/build_macos.py
 uv run python scripts/verify.py
 swift test --package-path native -c release
-node --check integrations/dsh/index.mjs
+node --test tests/dsh/bridge.test.mjs
+npm ci
+npm test
 uv run python scripts/check_release.py
 ```
 

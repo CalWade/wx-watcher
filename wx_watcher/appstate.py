@@ -1,27 +1,38 @@
 """Per-user application state, independent of checkout location."""
+
 from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 import tempfile
 import threading
 import uuid
+from pathlib import Path
 
 from .source import private_dir
 
 
 def app_home() -> Path:
-    return Path(os.environ.get("WX_WATCHER_HOME", "~/Library/Application Support/WXWatcher")).expanduser().resolve()
+    return (
+        Path(
+            os.environ.get("WX_WATCHER_HOME", "~/Library/Application Support/WXWatcher")
+        )
+        .expanduser()
+        .resolve()
+    )
 
 
 def atomic_json(path: Path, value):
+    atomic_text(path, json.dumps(value, ensure_ascii=False, indent=2))
+
+
+def atomic_text(path: Path, value: str):
     private_dir(path.parent)
     fd, tmp = tempfile.mkstemp(prefix=".write-", dir=path.parent)
     try:
         os.fchmod(fd, 0o600)
         with os.fdopen(fd, "w") as f:
-            json.dump(value, f, ensure_ascii=False, indent=2)
+            f.write(value)
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp, path)
@@ -33,19 +44,40 @@ class AppState:
     def __init__(self, directory: Path | None = None):
         self.home = directory or app_home()
         self.home = self.home.expanduser().resolve()
-        protected = Path.home()/"Library/Containers/com.tencent.xinWeChat"
-        if self.home in {Path('/'), Path.home().resolve()} or self.home.is_relative_to(protected):
+        protected = Path.home() / "Library/Containers/com.tencent.xinWeChat"
+        if self.home in {Path("/"), Path.home().resolve()} or self.home.is_relative_to(
+            protected
+        ):
             raise ValueError("应用数据目录必须独立，不能使用用户根目录或微信容器")
         private_dir(self.home)
         self.file = self.home / "settings.json"
         self.lock = threading.RLock()
         if not self.file.exists():
-            atomic_json(self.file, {"version": 1, "profiles": [], "active_profile": "",
-                "chat_id": "", "group_name": "", "business_context": "", "knowledge_files": [],
-                "reply_rules": "", "feishu_transport": "cli", "feishu_chat_id": "", "feishu_chat_name": "",
-                "feishu_app_id": "", "feishu_secret_ref": "", "dsh_port": 8766,
-                "reader_port": 18765, "send_enabled": False, "autostart_monitor": False,
-                "debounce_seconds": 2, "max_daily_calls": 100, "retention_days": 30})
+            atomic_json(
+                self.file,
+                {
+                    "version": 1,
+                    "profiles": [],
+                    "active_profile": "",
+                    "chat_id": "",
+                    "group_name": "",
+                    "business_context": "",
+                    "knowledge_files": [],
+                    "reply_rules": "",
+                    "feishu_transport": "cli",
+                    "feishu_chat_id": "",
+                    "feishu_chat_name": "",
+                    "feishu_app_id": "",
+                    "feishu_secret_ref": "",
+                    "dsh_port": 8766,
+                    "reader_port": 18765,
+                    "send_enabled": False,
+                    "autostart_monitor": False,
+                    "debounce_seconds": 2,
+                    "max_daily_calls": 100,
+                    "retention_days": 30,
+                },
+            )
 
     def load(self) -> dict:
         with self.lock:
@@ -71,17 +103,29 @@ class AppState:
             raise ValueError("所选目录不是有效的微信 db_storage")
         with self.lock:
             state = self.load()
-            profile = {"id": str(uuid.uuid4()), "db_root": str(root), "key_ref": key_ref,
-                       "label": label or root.parent.name, "verification": verification or {}}
+            profile = {
+                "id": str(uuid.uuid4()),
+                "db_root": str(root),
+                "key_ref": key_ref,
+                "label": label or root.parent.name,
+                "verification": verification or {},
+            }
             profiles = [p for p in state["profiles"] if p["db_root"] != str(root)]
             profiles.append(profile)
-            return self.update(profiles=profiles, active_profile=profile["id"], chat_id="", group_name="")
+            return self.update(
+                profiles=profiles,
+                active_profile=profile["id"],
+                chat_id="",
+                group_name="",
+            )
 
     def write_configs(self) -> tuple[Path, Path]:
         state, profile = self.load(), self.profile()
         if not state.get("chat_id"):
             raise ValueError("请先选择要监听的微信会话")
-        scope = self.home / "profiles" / profile["id"] / state["chat_id"].replace("@", "_")
+        scope = (
+            self.home / "profiles" / profile["id"] / state["chat_id"].replace("@", "_")
+        )
         private_dir(scope)
         config = self.home / "config"
         private_dir(config)
@@ -89,21 +133,54 @@ class AppState:
         def write(file, values):
             lines = []
             for k, value in values.items():
-                lines.append(k + " = " + (str(value).lower() if isinstance(value, bool) else json.dumps(value, ensure_ascii=False)))
-            file.write_text("\n".join(lines) + "\n")
-            file.chmod(0o600)
+                lines.append(
+                    k
+                    + " = "
+                    + (
+                        str(value).lower()
+                        if isinstance(value, bool)
+                        else json.dumps(value, ensure_ascii=False)
+                    )
+                )
+            atomic_text(file, "\n".join(lines) + "\n")
 
         reader = config / "reader.toml"
-        write(reader, {"db_root": profile["db_root"], "key_ref": profile["key_ref"],
-            "group_name": state["group_name"], "chat_id": state["chat_id"],
-            "state_dir": str(scope / "reader"), "port": state["reader_port"], "poll_interval": 1.0})
+        write(
+            reader,
+            {
+                "db_root": profile["db_root"],
+                "key_ref": profile["key_ref"],
+                "group_name": state["group_name"],
+                "chat_id": state["chat_id"],
+                "state_dir": str(scope / "reader"),
+                "port": state["reader_port"],
+                "poll_interval": 1.0,
+                "retention_days": state["retention_days"],
+            },
+        )
         reply = config / "reply.toml"
-        write(reply, {"reader_config": str(reader), "state_dir": str(scope / "agent"),
-            "dsh_token_file": str(Path.home() / ".dsh/storages/wx-reply-agent/token"),
-            "dsh_port": state["dsh_port"], "feishu_chat_id": state["feishu_chat_id"],
-            "feishu_chat_name": state["feishu_chat_name"], "send_enabled": state["send_enabled"],
-            "business_context": state["business_context"], "knowledge_files": state["knowledge_files"],
-            "reply_rules": state["reply_rules"], "debounce_seconds": state["debounce_seconds"],
-            "max_daily_calls": state["max_daily_calls"], "feishu_transport": state["feishu_transport"],
-            "feishu_app_id": state["feishu_app_id"], "feishu_secret_ref": state["feishu_secret_ref"]})
+        write(
+            reply,
+            {
+                "reader_config": str(reader),
+                "state_dir": str(scope / "agent"),
+                "dsh_token_file": str(
+                    Path(os.environ.get("DSH_HOME", str(Path.home() / ".dsh")))
+                    / "storages/wx-reply-agent/token"
+                ),
+                "dsh_port": state["dsh_port"],
+                "feishu_chat_id": state["feishu_chat_id"],
+                "feishu_chat_name": state["feishu_chat_name"],
+                "send_enabled": state["send_enabled"],
+                "business_context": state["business_context"],
+                "knowledge_files": state["knowledge_files"],
+                "reply_rules": state["reply_rules"],
+                "debounce_seconds": state["debounce_seconds"],
+                "max_daily_calls": state["max_daily_calls"],
+                "retention_days": state["retention_days"],
+                "feishu_transport": state["feishu_transport"],
+                "feishu_app_id": state["feishu_app_id"],
+                "feishu_secret_ref": state["feishu_secret_ref"],
+            },
+        )
         return reader, reply

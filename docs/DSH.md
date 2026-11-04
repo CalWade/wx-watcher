@@ -48,3 +48,28 @@ Agent 使用当前默认渠道。模型看不到执行工具，工具调用也�
 | 模型失败 | 到对应 DSH 会话查渠道错误，不要在公开 Issue 粘贴请求转储 |
 | 没有费用 | 区分缺少 provider usage、插件没加载、价格未知；不能把未知价格记成免费 |
 | DSH 退出 | 保留任务，重开 DSH 后继续查询；中断的调用需要检查原会话 |
+
+## 从空白 DSH 环境安装 cost-meter
+
+已有插件且测试正常时继续复用，不需要为了 WX Watcher 升级。没有插件时：
+
+1. 从 [DSH 官方 Releases](https://github.com/deepseek-ai/deepseek-harness/releases)
+   安装 Desktop，至少正常启动一次，让它创建 desktop Profile。
+2. 在 Desktop 提供的命令行安装入口安装其自带 `dsh` 命令；不要用另一个全局 DSH
+   命令修改 Desktop 的依赖。完全退出 Desktop 后安装插件。
+3. 按 [cost-meter 的 Desktop 安装说明](https://github.com/Han-1413141/dsh-cost-meter#installation)
+   选择与宿主兼容的版本。本项目曾实际验证 1.9.16，示例固定该版本：
+
+   ```sh
+   dsh plugin --profile desktop add dsh-cost-meter@1.9.16
+   ```
+
+4. 重新打开 Desktop，在费用设置确认插件加载。需要 pnpm 时复用现有兼容版本；
+   包管理器报错应修复真实环境，不修改其他模型渠道。
+5. 先在 DSH 普通会话问一个简短问题，确认能返回内容且费用面板有相应记录。
+6. 再打开 WX Watcher 安装桥接并点击模型测试。若改用新 DSH / cost-meter 版本，
+   重新验证宿主服务契约与记账；上面的固定版本不是对新版宿主的兼容承诺。
+
+桥接正常测试至少应满足：ready=true、tools=0、cost_meter.found=true。
+提示词和模型结果会保存在 DSH 的会话及桥接私有任务中，需按自己的数据保留策略管理。
+损坏的桥接任务文件会隔离到 quarantine；不会阻止其他任务启动，也不会当作成功结果。

@@ -7,11 +7,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     var item: NSStatusItem!
     var backend: Process?
     var timer: Timer?
-    let isKeytool = CommandLine.arguments.contains("--keytool")
+    let isKeytool = CommandLine.arguments.contains("--keytool") || (Bundle.main.object(forInfoDictionaryKey: "WXKeytoolMode") as? Bool == true)
     var baseURL: URL?
+    var outputBuffer = Data()
+    var terminationSignals: [DispatchSourceSignal] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
+        let bar = NSMenu()
+        let appEntry = NSMenuItem(); bar.addItem(appEntry)
+        let appMenu = NSMenu(); appEntry.submenu = appMenu
+        let quitItem = appMenu.addItem(withTitle: "退出 WX Watcher", action: #selector(quit), keyEquivalent: "q")
+        quitItem.target = self
+        let editEntry = NSMenuItem(); bar.addItem(editEntry)
+        let editMenu = NSMenu(title: "编辑"); editEntry.submenu = editMenu
+        for (title, action, key) in [("撤销", "undo:", "z"), ("剪切", "cut:", "x"), ("复制", "copy:", "c"), ("粘贴", "paste:", "v"), ("全选", "selectAll:", "a")] {
+            editMenu.addItem(withTitle: title, action: Selector(action), keyEquivalent: key)
+        }
+        NSApp.mainMenu = bar
+        for value in [SIGTERM, SIGINT] {
+            signal(value, SIG_IGN)
+            let source = DispatchSource.makeSignalSource(signal: value, queue: .main)
+            source.setEventHandler { NSApp.terminate(nil) }
+            source.resume(); terminationSignals.append(source)
+        }
         let config = WKWebViewConfiguration()
         config.userContentController.add(self, name: "native")
         web = WKWebView(frame: .zero, configuration: config)
@@ -48,6 +67,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         process.arguments = ["desktop", "--no-browser"] + (isKeytool ? ["--keytool"] : [])
         var environment = ProcessInfo.processInfo.environment
         environment["WX_KEYTOOL_BIN"] = resources.appendingPathComponent("wx-keytool").path
+        environment["WX_WATCHER_PARENT_PID"] = String(ProcessInfo.processInfo.processIdentifier)
         process.environment = environment
         let pipe = Pipe()
         process.standardOutput = pipe
@@ -55,14 +75,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         let reader = pipe.fileHandleForReading
         reader.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
-            guard !data.isEmpty else { return }
-            if let text = String(data: data, encoding: .utf8),
-               let line = text.split(separator: "\n").first(where: { $0.contains("\"desktop_url\"") }),
-               let json = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
-               let value = json["desktop_url"] as? String, let url = URL(string: value) {
-                DispatchQueue.main.async {
-                    self?.baseURL = URL(string: "http://127.0.0.1:\(url.port ?? 8767)")
-                    self?.web.load(URLRequest(url: url))
+            if data.isEmpty { handle.readabilityHandler = nil; return }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.outputBuffer.append(data)
+                if self.outputBuffer.count > 65_536 { self.outputBuffer.removeAll(); return }
+                while let newline = self.outputBuffer.firstIndex(of: 10) {
+                    let line = self.outputBuffer.prefix(upTo: newline)
+                    self.outputBuffer.removeSubrange(...newline)
+                    if let json = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
+                       let value = json["desktop_url"] as? String, let url = URL(string: value),
+                       url.host == "127.0.0.1", url.scheme == "http" {
+                        self.baseURL = URL(string: "http://127.0.0.1:\(url.port ?? 8767)")
+                        self.web.load(URLRequest(url: url))
+                    }
                 }
             }
         }
@@ -72,7 +98,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     @objc func show() { window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true) }
     @objc func quit() { NSApp.terminate(nil) }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
-    func applicationWillTerminate(_ notification: Notification) { backend?.terminate() }
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        show(); return true
+    }
+    func applicationWillTerminate(_ notification: Notification) {
+        if backend?.isRunning == true { backend?.terminate() }
+    }
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
                  decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void) {
         guard let url = navigationAction.request.url else { decisionHandler(.cancel); return }

@@ -2,7 +2,9 @@
 
 ## 1. 确认适用范围
 
-目前面向 Apple Silicon Mac。应用最低构建目标 macOS 14，真实整合验证组合在 README 中列出。
+目前面向 Apple Silicon Mac。原生界面的源码目标是 macOS 14；实际应用最低版本取所有打包依赖的最大值。
+本机发布的 0.2.0 安装包因 SQLCipher/OpenSSL 依赖要求 **macOS 27.0+**，
+安装包 Info.plist 与 build-manifest.json 会如实记录。真实整合组合在 README 中列出。
 首次取钥只放行已验证的微信构建；数据库读取、应用能启动和取钥成功是不同的验收项。
 请只连接本人账号或有明确处理权限的数据。
 
@@ -30,10 +32,12 @@ git clone https://github.com/CalWade/wx-watcher.git
 cd wx-watcher
 uv sync --frozen
 swift build --package-path native -c release
+codesign --force --sign - native/.build/release/wx-keytool
 uv run wx-watcher desktop
 ```
 
-原生模块需要 Swift 6 和适用的 Apple 开发者工具。`xcode-select --install` 可安装 CLT，
+上面的临时签名使本地构建的凭据工具具有代码身份；未签名工具可能被 Keychain 拒绝。
+正式分发仍应使用稳定 Developer ID。原生模块需要 Swift 6 和适用的 Apple 开发者工具。`xcode-select --install` 可安装 CLT，
 但取钥调试器仍需单独通过兼容检查：曾验证的 macOS 27 环境使用 Xcode 内的 LLDB 2103，
 旧 LLDB 1600 在附加时崩溃。工具会在修改微信之前拒绝不合适的组合。
 不要为通过检查盲目更改系统 Xcode 选择或关闭系统保护。

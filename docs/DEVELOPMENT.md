@@ -17,6 +17,7 @@
 ```sh
 uv sync --frozen --group build
 swift build --package-path native -c release
+codesign --force --sign - native/.build/release/wx-keytool
 uv run wx-watcher desktop
 ```
 
@@ -29,7 +30,11 @@ uv run wx-watcher desktop
 uv run python scripts/verify.py
 swift test --package-path native -c release
 node --check wx_watcher/assets/app.js
-node --check integrations/dsh/index.mjs
+node --test tests/dsh/bridge.test.mjs
+npm ci
+npm test
+uv run ruff check wx_watcher scripts tests
+uv run ruff format --check wx_watcher scripts tests
 uv run python scripts/check_release.py
 ```
 
@@ -45,7 +50,9 @@ uv run python scripts/build_macos.py
 
 构建 Swift 两个入口，冻结 Python 后端，收集 SQLCipher 与其动态库和许可证，
 创建 Mac 应用、压缩包、DMG 与 SHA-256。原始构建目录不会加入仓库。
-PyInstaller 的构建依赖在 uv.lock 中锁定。
+PyInstaller 的构建依赖在 uv.lock 中锁定。构建器扫描 Mach-O 最低系统版本，
+取所有依赖的最大值写入应用和发布清单，不能只根据 Swift 的 macOS 14 目标声明兼容。
+本机 0.2.0 构建的实际最低版本为 macOS 27.0。
 
 本地无 Developer ID 时采用临时签名，清楚标记未公证。
 正式签名通过构建环境的 `WX_CODESIGN_IDENTITY` 提供；公证凭据只放维护者本机或

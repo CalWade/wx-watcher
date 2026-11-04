@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """同机 Agent/外部程序调用示例；不把凭据写进命令参数或 URL。"""
+
 import argparse
 import json
-from pathlib import Path
 import sys
+from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
@@ -12,7 +13,11 @@ from wx_watcher.config import Config
 
 parser = argparse.ArgumentParser()
 parser.add_argument("resource", choices=["status", "messages", "events"])
-parser.add_argument("--config", type=Path, default=Path(__file__).resolve().parents[1] / "config/local.toml")
+parser.add_argument(
+    "--config",
+    type=Path,
+    default=Path(__file__).resolve().parents[1] / "config/local.toml",
+)
 parser.add_argument("--limit", type=int, default=50)
 parser.add_argument("--after", type=int, default=0)
 args = parser.parse_args()

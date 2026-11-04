@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import hashlib
-
-from datetime import datetime, timezone
 import threading
 import time
+from datetime import UTC, datetime
 
 from .config import Config
 from .source import WeChatSource
@@ -20,10 +19,13 @@ class Collector:
         self.thread: threading.Thread | None = None
         self._status_lock = threading.Lock()
         self._status = {
-            "state": "starting", "mode": "read_only_database",
-            "backend": config.backend, "group_name": config.group_name,
-            "live_verified": bool(store.events(0, 1)["events"]),
+            "state": "starting",
+            "mode": "read_only_database",
+            "backend": config.backend,
+            "group_name": config.group_name,
+            "live_verified": store.had_live_events(),
         }
+        self._last_prune = 0.0
 
     def status(self) -> dict:
         with self._status_lock:
@@ -46,17 +48,29 @@ class Collector:
         for shard in shards:
             # 在同一快照内确定代次与水位，避免换库期间串用旧水位。
             after = None if baseline else marks
-            generation, rows = self.source.read_shard(shard, after, limit=200 if baseline else 1000)
+            generation, rows = self.source.read_shard(
+                shard, after, limit=200 if baseline else 1000
+            )
             batches.append((generation, rows))
         inserted = self.store.apply(batches, baseline)
+        if self.config.retention_days and time.monotonic() - self._last_prune > 3600:
+            self.store.prune(int(time.time()) - self.config.retention_days * 86400)
+            self._last_prune = time.monotonic()
         self.update_status(
-            state="ready", error=None, chat_id=chat, shard_count=len(shards),
-            scope_id=hashlib.sha256((str(self.source.root.resolve()) + "\n" + chat).encode()).hexdigest(),
-            last_success=datetime.now(timezone.utc).isoformat(),
+            state="ready",
+            error=None,
+            chat_id=chat,
+            shard_count=len(shards),
+            scope_id=hashlib.sha256(
+                (str(self.source.root.resolve()) + "\n" + chat).encode()
+            ).hexdigest(),
+            last_success=datetime.now(UTC).isoformat(),
             last_scan_seconds=round(time.monotonic() - started, 4),
-            last_new_events=inserted, baseline_complete=True,
+            last_new_events=inserted,
+            baseline_complete=True,
             group_name=self.source.display_name or self.config.group_name,
             live_verified=self.status()["live_verified"] or inserted > 0,
+            event_cursor=self.store.event_cursor(),
         )
         return inserted
 
@@ -64,7 +78,9 @@ class Collector:
         if self.thread and self.thread.is_alive():
             return
         self.stop_event.clear()
-        self.thread = threading.Thread(target=self._run, name="wechat-db-reader", daemon=True)
+        self.thread = threading.Thread(
+            target=self._run, name="wechat-db-reader", daemon=True
+        )
         self.thread.start()
 
     def _run(self):
@@ -72,7 +88,9 @@ class Collector:
             try:
                 self.poll()
             except Exception as exc:
-                self.update_status(state="blocked", error_type=type(exc).__name__, error=str(exc))
+                self.update_status(
+                    state="blocked", error_type=type(exc).__name__, error=str(exc)
+                )
             self.stop_event.wait(self.config.poll_interval)
 
     def stop(self):

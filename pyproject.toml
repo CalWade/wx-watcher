@@ -29,3 +29,16 @@ packages = ["wx_watcher"]
 build = [
     "pyinstaller>=6,<7",
 ]
+dev = [
+    "ruff>=0.14,<1",
+]
+
+[tool.ruff]
+target-version = "py312"
+extend-exclude = ["wx_watcher/_vendor", "native", "build", "dist"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/*.py" = ["E402"]

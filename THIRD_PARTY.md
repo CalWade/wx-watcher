@@ -52,3 +52,16 @@ those of redistributed dependencies are collected for app distribution.
 
 External application bundles, private profiles, account data and credentials are
 not redistributed with this repository.
+
+## Additional runtime notices
+
+Mac artifacts include the Python 3.12 license (copied from the installed CPython
+3.12.13 distribution), zstd 1.5.7 BSD license, and the installed notices for
+liblzma (XZ, 0BSD), mpdecimal (BSD), OpenSSL and SQLCipher. SQLite is in the public
+domain: https://sqlite.org/copyright.html. The Python license also credits its
+included components. Original license text is retained in `licenses/` and each
+application's `Contents/Resources/Notices/`; PyInstaller includes its bootloader
+exception. System macOS frameworks remain OS-provided.
+
+Primary sources: https://github.com/python/cpython/blob/v3.12.13/LICENSE and
+https://github.com/facebook/zstd/blob/v1.5.7/LICENSE.

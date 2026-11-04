@@ -1,20 +1,33 @@
 #!/usr/bin/env python3
 """真实启动 CLI 与 HTTP 服务，保存脱敏就绪状态，结束后关闭本次服务。"""
+
 import json
-from pathlib import Path
 import subprocess
 import sys
 import time
+from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(root))
 from wx_watcher.config import Config
+
 config = Config.load(root / "config/local.toml")
-process = subprocess.Popen([sys.executable, "-m", "wx_watcher", "--config",
-                            str(root / "config/local.toml"), "serve"],
-                           cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+process = subprocess.Popen(
+    [
+        sys.executable,
+        "-m",
+        "wx_watcher",
+        "--config",
+        str(root / "config/local.toml"),
+        "serve",
+    ],
+    cwd=root,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.PIPE,
+    text=True,
+)
 try:
     deadline = time.monotonic() + 8
     result = None
@@ -24,7 +37,9 @@ try:
         try:
             token = (config.state_dir / "api-token.txt").read_text().strip()
             url = f"http://127.0.0.1:{config.port}/v1/status"
-            with urlopen(Request(url, headers={"Authorization": "Bearer " + token}), timeout=1) as response:
+            with urlopen(
+                Request(url, headers={"Authorization": "Bearer " + token}), timeout=1
+            ) as response:
                 result = json.load(response)
             if result["state"] != "starting":
                 break
@@ -41,7 +56,9 @@ try:
         raise AssertionError("未认证请求没有被拒绝")
     result["http_api_verified"] = True
     result["unauthenticated_request_rejected"] = True
-    (root / "output/live-preflight.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
+    (root / "output/live-preflight.json").write_text(
+        json.dumps(result, ensure_ascii=False, indent=2) + "\n"
+    )
     print(json.dumps(result, ensure_ascii=False, indent=2))
 finally:
     process.terminate()

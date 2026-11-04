@@ -6,6 +6,26 @@ from wx_watcher.feishu import Feishu
 
 
 class FeishuTests(unittest.TestCase):
+    def test_cli_unwrapped_text_is_compared_exactly(self):
+        client = Feishu("cli")
+        result = {
+            "data": {
+                "messages": [
+                    {
+                        "message_id": "m1",
+                        "msg_type": "text",
+                        "content": "line one\n第二行",
+                    }
+                ]
+            }
+        }
+        with patch.object(client, "readback", return_value=result):
+            self.assertTrue(client.confirm_readback("m1", "line one\n第二行"))
+            with self.assertRaises(RuntimeError):
+                client.confirm_readback("m1", "different")
+            with self.assertRaises(RuntimeError):
+                client.confirm_readback("wrong-id", "line one\n第二行")
+
     def test_direct_bot_send_preserves_idempotency_and_plain_text(self):
         client = Feishu("openapi", "app", "reference")
         with patch.object(

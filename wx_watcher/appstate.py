@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import tempfile
 import threading
 import uuid
@@ -64,7 +65,10 @@ class AppState:
                     "business_context": "",
                     "knowledge_files": [],
                     "reply_rules": "",
-                    "feishu_transport": "cli",
+                    "feishu_transport": "cli"
+                    if shutil.which("lark-cli")
+                    or Path("/opt/homebrew/bin/lark-cli").is_file()
+                    else "openapi",
                     "feishu_chat_id": "",
                     "feishu_chat_name": "",
                     "feishu_app_id": "",

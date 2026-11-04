@@ -47,3 +47,21 @@ test("credential page never displays secret material", async ({ page }) => {
     "password",
   );
 });
+test("automatic connection exposes choices and completes setup in one flow", async ({
+  page,
+}) => {
+  await page.locator("#auto-connect").click();
+  await closeJob(page);
+  await expect(page.locator("#onboarding-checks")).toContainText(
+    "合成连接检查",
+  );
+  await page.locator("#chats button").first().click();
+  await closeJob(page);
+  await page.locator("#feishu-chats button").first().click();
+  await closeJob(page);
+  await page.locator("#finish-setup").click();
+  await closeJob(page);
+  await expect(page.locator("#health")).toContainText("正在监控");
+  await page.locator('[data-op="stop"]').click();
+  await closeJob(page);
+});

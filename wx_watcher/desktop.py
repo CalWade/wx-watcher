@@ -16,7 +16,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from .appstate import app_home, atomic_json
+from .appstate import AppState, app_home, atomic_json
 from .controller import Controller
 
 
@@ -100,6 +100,10 @@ def create_desktop(controller: Controller, token: str, port=0):
                             "services": controller.services.status(),
                             "records": controller.records(),
                             "jobs": list(controller.jobs.values())[-20:],
+                            "login_installed": (
+                                Path.home()
+                                / "Library/LaunchAgents/io.github.calwade.wx-watcher.plist"
+                            ).exists(),
                         },
                     )
                 if route.path == "/api/job":
@@ -164,6 +168,9 @@ def create_desktop(controller: Controller, token: str, port=0):
                 "task-review",
                 "reset-cursor",
                 "login-service",
+                "auto-connect",
+                "finish-setup",
+                "run-settings",
             }
             operation = self.path.removeprefix("/api/action/")
             if not self.path.startswith("/api/action/") or operation not in allowed:
@@ -197,7 +204,7 @@ def main():
         url = endpoint["url"]
         if args.keytool or args.command == "keytool":
             url = url.replace("page=setup", "page=keytool")
-        print(json.dumps({"desktop_url": url}), flush=True)
+        print(json.dumps({"desktop_url": url, "reused": True}), flush=True)
         if not args.no_browser:
             webbrowser.open(url)
         return 0
@@ -248,17 +255,27 @@ def main():
 def manage_login(action, directory, quiet=False):
     import plistlib
     import subprocess
+    import sys
 
     from .services import command
 
     file = Path.home() / "Library/LaunchAgents/io.github.calwade.wx-watcher.plist"
     if action == "install":
+        directory = AppState(directory).home
         file.parent.mkdir(parents=True, exist_ok=True)
+        args = command("desktop", "--no-browser", "--data-dir", str(directory))
+        if getattr(sys, "frozen", False):
+            gui = Path(sys.executable).parents[2] / "MacOS/WXWatcher"
+            if gui.is_file():
+                args = [str(gui), "--background"]
+        for name in ["desktop-launch.log", "desktop-error.log"]:
+            log = directory / name
+            log.touch(mode=0o600, exist_ok=True)
+            log.chmod(0o600)
         value = {
             "Label": "io.github.calwade.wx-watcher",
-            "ProgramArguments": command(
-                "desktop", "--no-browser", "--data-dir", str(directory)
-            ),
+            "ProgramArguments": args,
+            "EnvironmentVariables": {"WX_WATCHER_HOME": str(directory)},
             "RunAtLoad": True,
             "KeepAlive": False,
             "WorkingDirectory": str(Path.home()),

@@ -3,6 +3,8 @@
 ## 0.2.0
 
 - Mac launcher/menu bar and authenticated local setup console.
+- Automatic account/credential reuse, DSH/cost-meter preparation and combined connection checks.
+- Native privacy registration probe, single-page login options and available-port selection.
 - Standalone key tool, Keychain references and encrypted credential backup.
 - Pinned acquisition code, explicit progress, cancellation and recovery.
 - Conversation selection, local knowledge passages and reply rules.

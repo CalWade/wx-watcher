@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import sqlite3
 import subprocess
 import sys
@@ -49,6 +50,15 @@ class Services:
                 raise
 
     def _start(self):
+        requested = self.state.load()["reader_port"]
+        with socket.socket() as reservation:
+            try:
+                reservation.bind(("127.0.0.1", requested))
+            except OSError:
+                reservation.bind(("127.0.0.1", 0))
+            selected = reservation.getsockname()[1]
+        if requested != selected:
+            self.state.update(reader_port=selected)
         reader, reply = self.state.write_configs()
         self._spawn("reader", command("--config", str(reader), "serve"))
         config = Config.load(reader)

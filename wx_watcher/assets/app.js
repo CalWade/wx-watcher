@@ -12,6 +12,7 @@ let settings = {},
   state = {},
   page = "setup",
   timer;
+let connectionReport = null;
 const escape = (value) =>
   String(value ?? "").replace(
     /[&<>"']/g,
@@ -77,6 +78,10 @@ function describeResult(op, value) {
   if (op === "doctor" && value.wechat_data_access?.readable === false)
     return value.wechat_data_access.hint;
   if (value.message || value.hint) return value.message || value.hint;
+  if (op === "auto-connect")
+    return value.checks.every((c) => c.ok)
+      ? "本机连接已就绪。请选择微信会话和飞书接收群，再测试全链路。"
+      : "已自动完成可用的连接，请关闭此窗口处理页面中标出的事项。";
   if (op === "capture-preflight")
     return value.ready
       ? "环境与当前登录账号检查通过，可以开始取钥。"
@@ -211,10 +216,63 @@ function overview() {
   bind("open-setup", () => navigate("setup"));
   bind("open-records", () => navigate("records"));
 }
+function renderConversationChoices(rows) {
+  const target = $("#chats");
+  if (!target) return;
+  target.replaceChildren(
+    ...rows.map((r) => {
+      const b = document.createElement("button");
+      b.textContent = r.name;
+      b.onclick = async () => {
+        try {
+          await action(
+            "settings",
+            { chat_id: r.username, group_name: r.name },
+            "选择监听会话",
+          );
+          render();
+        } catch (e) {
+          notice(e.message, true);
+        }
+      };
+      return b;
+    }),
+  );
+}
+function renderFeishuChoices(rows) {
+  const target = $("#feishu-chats");
+  if (!target) return;
+  target.replaceChildren(
+    ...rows.map((r) => {
+      const b = document.createElement("button");
+      b.textContent = r.name;
+      b.onclick = async () => {
+        try {
+          await action(
+            "settings",
+            { feishu_chat_id: r.chat_id, feishu_chat_name: r.name },
+            "选择飞书接收群",
+          );
+          render();
+        } catch (e) {
+          notice(e.message, true);
+        }
+      };
+      return b;
+    }),
+  );
+}
+function runOptions() {
+  return {
+    send_enabled: $("#send-enabled").checked,
+    autostart_monitor: $("#autostart-monitor").checked,
+    login_enabled: $("#login-start").checked,
+  };
+}
 function setup() {
   const connected = settings.profiles.length > 0;
   $("#content").innerHTML =
-    `<div class="steps"><span class="step ${connected ? "done" : ""}">1 连接微信</span><span class="step ${settings.chat_id ? "done" : ""}">2 选择会话</span><span class="step">3 DSH 模型</span><span class="step ${settings.feishu_chat_id ? "done" : ""}">4 飞书接收群</span><span class="step">5 测试并运行</span></div><div class="two">${card("1 · 连接微信账号", `<p class="muted">已有密钥直接导入并保存到 Keychain；首次取钥提供独立进度向导。</p><div class="row"><span>已连接账号</span><strong>${settings.profiles.length}</strong></div><label>当前账号<select id="active-profile">${settings.profiles.map((p) => `<option value="${escape(p.id)}" ${p.id === settings.active_profile ? "selected" : ""}>${escape(p.label)}</option>`).join("")}</select></label><div class="actions"><button id="switch-profile">切换到所选账号</button><button id="go-keytool" class="primary">打开微信凭据</button>${button("检查运行环境", "doctor")}</div>`)}${card("2 · 选择微信会话", `<p class="muted">只监听明确选择的会话，首次扫描建立基线。</p>${field("搜索群名", "chat-query", settings.group_name)}<div class="actions"><button id="find-chats">搜索会话</button></div><div id="chats"></div><p class="note">当前：${escape(settings.group_name || "尚未选择")}</p>`)}</div><div class="two">${card("3 · DSH 模型与用量", `<p class="muted">复用你在 DSH 中配置的模型渠道。DSH 和 dsh-cost-meter 需要保持可用。</p><div class="actions">${button("安装 / 更新桥接插件", "install-dsh")}${button("测试模型与记账", "test-dsh")}</div><p class="note">模型测试会发起一次真实调用并产生对应渠道用量。</p>`)}${card("4 · 飞书应用机器人", `<label>连接方式<select id="feishu-transport"><option value="cli" ${settings.feishu_transport === "cli" ? "selected" : ""}>复用已有 Lark CLI</option><option value="openapi" ${settings.feishu_transport === "openapi" ? "selected" : ""}>自建飞书应用</option></select></label><div class="actions"><button id="save-transport">保存连接方式</button></div>${field("自建应用 App ID", "app-id", settings.feishu_app_id)}${field("App Secret（保存后不会显示）", "app-secret", "", "password")}<div class="actions"><button id="save-secret">保存到 Keychain</button><button id="find-feishu">获取机器人所在群</button></div><div id="feishu-chats"></div><p class="note">当前接收群：${escape(settings.feishu_chat_name || "尚未选择")}。先在飞书群中添加应用机器人。</p><div class="actions">${button("发送测试并回读", "test-feishu")}</div>`)}</div>${card("5 · 开启消息助手", `<label class="check"><input id="send-enabled" type="checkbox" ${settings.send_enabled ? "checked" : ""}> 将建议自动发到已选飞书内部群</label><label class="check"><input id="autostart-monitor" type="checkbox" ${settings.autostart_monitor ? "checked" : ""}> 打开本应用后自动恢复监控</label><p class="muted">保持 Mac 微信登录、DSH 开启。开启前检查待发草稿；已有草稿也可能进入投递。</p><div class="actions"><button id="save-run">保存运行选项</button>${button("开始监控", "start", true)}${button("暂停监控", "stop")}</div>`)}`;
+    `${card("自动接入", `<p class="muted">自动识别本机账号，复用已保存凭据、DSH 模型与费用插件，并读取飞书可选群。缺少费用插件时使用 DSH 自带的安装器补齐。</p><button id="auto-connect" class="primary">自动识别并连接</button><div id="onboarding-checks"></div>`)}<div class="steps"><span class="step ${connected ? "done" : ""}">1 连接微信</span><span class="step ${settings.chat_id ? "done" : ""}">2 选择会话</span><span class="step">3 DSH 模型</span><span class="step ${settings.feishu_chat_id ? "done" : ""}">4 飞书接收群</span><span class="step">5 测试并运行</span></div><div class="two">${card("1 · 连接微信账号", `<p class="muted">已有密钥直接导入并保存到 Keychain；首次取钥提供独立进度向导。</p><div class="row"><span>已连接账号</span><strong>${settings.profiles.length}</strong></div><label>当前账号<select id="active-profile">${settings.profiles.map((p) => `<option value="${escape(p.id)}" ${p.id === settings.active_profile ? "selected" : ""}>${escape(p.label)}</option>`).join("")}</select></label><div class="actions"><button id="switch-profile">切换到所选账号</button><button id="go-keytool" class="primary">打开微信凭据</button>${button("检查运行环境", "doctor")}</div>`)}${card("2 · 选择微信会话", `<p class="muted">只监听明确选择的会话，首次扫描建立基线。</p>${field("搜索群名", "chat-query", settings.group_name)}<div class="actions"><button id="find-chats">搜索会话</button></div><div id="chats"></div><p class="note">当前：${escape(settings.group_name || "尚未选择")}</p>`)}</div><div class="two">${card("3 · DSH 模型与用量", `<p class="muted">复用你在 DSH 中配置的模型渠道。DSH 和 dsh-cost-meter 需要保持可用。</p><div class="actions">${button("安装 / 更新桥接插件", "install-dsh")}${button("测试模型与记账", "test-dsh")}</div><p class="note">模型测试会发起一次真实调用并产生对应渠道用量。</p>`)}${card("4 · 飞书应用机器人", `<label>连接方式<select id="feishu-transport"><option value="cli" ${settings.feishu_transport === "cli" ? "selected" : ""}>复用已有 Lark CLI</option><option value="openapi" ${settings.feishu_transport === "openapi" ? "selected" : ""}>自建飞书应用</option></select></label><div class="actions"><button id="save-transport">保存连接方式</button></div>${settings.feishu_transport === "openapi" ? `<p><a href="https://open.feishu.cn/app" target="_blank" rel="noreferrer">打开飞书应用后台 ↗</a></p><button id="feishu-permissions">下载可批量导入的权限配置</button>${field("自建应用 App ID", "app-id", settings.feishu_app_id)}${field("App Secret（保存后不会显示）", "app-secret", "", "password")}<div class="actions"><button id="save-secret">保存到 Keychain</button></div>` : `<p class="note">复用本机 CLI 已连接的应用与机器人，无需再次填写密钥。</p>`}<div class="actions"><button id="find-feishu">获取机器人所在群</button></div><div id="feishu-chats"></div><p class="note">当前接收群：${escape(settings.feishu_chat_name || "尚未选择")}。先在飞书群中添加应用机器人。</p><div class="actions">${button("发送测试并回读", "test-feishu")}</div>`)}</div>${card("5 · 开启消息助手", `<label class="check"><input id="send-enabled" type="checkbox" ${settings.send_enabled ? "checked" : ""}> 将建议自动发到已选飞书内部群</label><label class="check"><input id="autostart-monitor" type="checkbox" ${settings.autostart_monitor ? "checked" : ""}> 打开本应用后自动恢复监控</label><label class="check"><input id="login-start" type="checkbox" ${state.login_installed ? "checked" : ""}> 登录 Mac 后在菜单栏启动应用</label><p class="muted">保持 Mac 微信登录、DSH 开启。开启前检查待发草稿；已有草稿也可能进入投递。</p><p class="note">「测试全链路并启动」会调用一次模型，并向上方选定飞书群发送一条连通性测试消息。</p><div class="actions"><button id="save-run">保存运行选项</button><button id="finish-setup" class="primary" ${settings.chat_id && settings.feishu_chat_id ? "" : "disabled"}>测试全链路并启动</button>${button("直接开始监控", "start")}${button("暂停监控", "stop")}</div>`)}`;
   bind("go-keytool", () => navigate("keytool"));
   bind("switch-profile", async () => {
     await action(
@@ -224,39 +282,53 @@ function setup() {
     );
     render();
   });
+  bind("auto-connect", async () => {
+    connectionReport = await action("auto-connect", {}, "自动连接本机环境");
+    render();
+  });
+  bind("finish-setup", async () => {
+    await action("finish-setup", runOptions(), "验证模型、费用与飞书并启动");
+    navigate("overview");
+  });
+  if (connectionReport) {
+    $("#onboarding-checks").innerHTML = connectionReport.checks
+      .map(
+        (c) =>
+          `<p class="${c.ok ? "success" : "error"}">${c.ok ? "✓" : "○"} ${escape(c.stage)}${c.message ? "：" + escape(c.message) : ""}</p>`,
+      )
+      .join("");
+    renderConversationChoices(connectionReport.conversations || []);
+    renderFeishuChoices(connectionReport.feishu_chats || []);
+  }
   bind("find-chats", async () => {
-    const rows = await action(
-      "conversations",
-      { query: $("#chat-query").value },
-      "读取本地会话",
-    );
-    $("#chats").replaceChildren(
-      ...rows.map((r) => {
-        const b = document.createElement("button");
-        b.textContent = r.name;
-        b.addEventListener("click", async () => {
-          try {
-            await action(
-              "settings",
-              { chat_id: r.username, group_name: r.name },
-              "选择监听会话",
-            );
-            render();
-          } catch (e) {
-            notice(e.message, true);
-          }
-        });
-        return b;
-      }),
+    renderConversationChoices(
+      await action(
+        "conversations",
+        { query: $("#chat-query").value },
+        "读取本地会话",
+      ),
     );
   });
-  bind("save-transport", () =>
-    action(
+  bind("feishu-permissions", () =>
+    download("feishu-permissions.json", {
+      scopes: {
+        tenant: [
+          "im:message:send_as_bot",
+          "im:chat:readonly",
+          "im:message:readonly",
+        ],
+        user: [],
+      },
+    }),
+  );
+  bind("save-transport", async () => {
+    await action(
       "settings",
       { feishu_transport: $("#feishu-transport").value },
       "保存飞书连接方式",
-    ),
-  );
+    );
+    render();
+  });
   bind("save-secret", async () => {
     await action(
       "feishu-secret",
@@ -267,38 +339,11 @@ function setup() {
   });
   bind("find-feishu", async () => {
     const result = await action("feishu-chats", {}, "读取机器人所在群");
-    const rows = result.data?.chats || [];
-    $("#feishu-chats").replaceChildren(
-      ...rows.map((r) => {
-        const b = document.createElement("button");
-        b.textContent = r.name;
-        b.addEventListener("click", async () => {
-          try {
-            await action(
-              "settings",
-              { feishu_chat_id: r.chat_id, feishu_chat_name: r.name },
-              "选择飞书接收群",
-            );
-            render();
-          } catch (e) {
-            notice(e.message, true);
-          }
-        });
-        return b;
-      }),
-    );
-    if (!rows.length) notice("机器人尚未加入可访问的群，请先在飞书中添加。");
+    renderFeishuChoices(result.data?.chats || []);
+    if (!result.data?.chats?.length)
+      notice("机器人尚未加入可访问的群，请先在飞书中添加。");
   });
-  bind("save-run", () =>
-    action(
-      "settings",
-      {
-        send_enabled: $("#send-enabled").checked,
-        autostart_monitor: $("#autostart-monitor").checked,
-      },
-      "保存运行选项",
-    ),
-  );
+  bind("save-run", () => action("run-settings", runOptions(), "保存运行选项"));
 }
 function keytool() {
   const profile = settings.profiles.find(
@@ -327,6 +372,20 @@ function keytool() {
   });
   bind("refresh-captures", loadCaptureSessions);
   loadCaptureSessions().catch((e) => notice(e.message, true));
+  if (!profile?.db_root) {
+    quietAction("accounts")
+      .then((rows) => {
+        if (page !== "keytool" || !$("#db-root") || $("#db-root").value) return;
+        const active = rows.filter((r) => r.active);
+        const chosen =
+          active.length === 1 ? active[0] : rows.length === 1 ? rows[0] : null;
+        if (chosen) {
+          $("#db-root").value = chosen.db_root;
+          $("#profile-label").value = chosen.label;
+        }
+      })
+      .catch((e) => notice(e.message, true));
+  }
   bind("pick-root", async () => {
     $("#db-root").value = await nativePick("choose-directory");
   });

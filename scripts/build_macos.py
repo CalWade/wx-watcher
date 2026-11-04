@@ -138,6 +138,7 @@ def main():
             "NSHighResolutionCapable": True,
             "WXKeytoolMode": keytool,
             "NSAppleEventsUsageDescription": "在你确认后使用系统授权窗口启动一次性的微信取钥与恢复任务。",
+            "NSSystemAdministrationUsageDescription": "读取你选择的微信本地数据库，用于生成内部回复建议。系统授权仍由你本人确认。",
         }
         with (contents / "Info.plist").open("wb") as f:
             plistlib.dump(info, f)

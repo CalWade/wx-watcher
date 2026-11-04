@@ -66,6 +66,24 @@ class FixtureController(Controller):
         ]
 
     def perform(self, operation, data):
+        if operation == "auto-connect":
+            return {
+                "checks": [{"stage": "合成连接检查", "ok": True}],
+                "conversations": [{"username": "filehelper", "name": "文件传输助手"}],
+                "feishu_chats": [{"chat_id": "oc_fixture", "name": "合成测试群"}],
+            }
+        if operation == "run-settings":
+            return super().perform(
+                "settings",
+                {
+                    k: data[k]
+                    for k in ["send_enabled", "autostart_monitor"]
+                    if k in data
+                },
+            )
+        if operation == "finish-setup":
+            self.services.start()
+            return {"running": True, "message": "合成链路已启动"}
         if operation == "conversations":
             return [{"username": "filehelper", "name": "文件传输助手"}]
         if operation == "doctor":

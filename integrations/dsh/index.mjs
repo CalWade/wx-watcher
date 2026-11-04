@@ -59,6 +59,9 @@ const SYSTEM = `你是客户群回复建议助手。根据提供的聊天数据�
 summary 最多200字，suggested_reply 最多1000字，reason 最多300字。不要提及模型、运行环境或工具。`;
 
 const digest = (text) => createHash("sha256").update(text).digest("hex");
+const SOURCE_DIGEST = digest(
+  await fs.readFile(new URL(import.meta.url), "utf8"),
+);
 const isId = (id) => typeof id === "string" && /^[a-f0-9]{64}$/.test(id);
 
 async function writePrivate(file, value) {
@@ -274,6 +277,7 @@ export async function apply(ctx, config = {}) {
           ready: !closing,
           mode: "reply-only",
           build: "0.2.0",
+          source_digest: SOURCE_DIGEST,
           route: ctx.agentDefaultModel.currentSelection(),
           cost_meter: "dsh-cost-meter",
           jobs: jobs.size,

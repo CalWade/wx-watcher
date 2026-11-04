@@ -192,12 +192,62 @@ class Controller:
             "stop",
             "task-review",
             "reset-cursor",
+            "auto-connect",
+            "finish-setup",
+            "run-settings",
         }:
             with self.lock:
                 return self._perform(operation, data)
         return self._perform(operation, data)
 
     def _perform(self, operation, data):
+        if operation == "auto-connect":
+            if self.services.running():
+                raise ValueError("请先暂停监控，再检查或更新连接")
+            from .onboarding import connect_existing
+
+            return connect_existing(self)
+        if operation == "finish-setup":
+            self.perform("run-settings", data)
+            verified = self.perform("verify-key", {})
+            if not verified.get("all_verified"):
+                raise RuntimeError("数据库凭据尚未全部验证通过，请先检查账号与数据权限")
+            model = self.perform("test-dsh", {})
+            if model.get("tools") != 0 or not (model.get("cost_meter") or {}).get(
+                "found"
+            ):
+                raise RuntimeError("模型工具隔离或费用记账检查未通过，请检查 DSH 连接")
+            delivery = self.perform("test-feishu", {})
+            services = self.perform("start", {})
+            return {
+                "model_tools": model["tools"],
+                "cost_recorded": True,
+                "readback": delivery["readback"],
+                "running": services["running"],
+                "message": "模型、费用和飞书回读检查通过，消息助手已启动",
+            }
+        if operation == "run-settings":
+            self.perform(
+                "settings",
+                {
+                    k: data[k]
+                    for k in ["send_enabled", "autostart_monitor"]
+                    if k in data
+                },
+            )
+            if "login_enabled" in data:
+                if type(data["login_enabled"]) is not bool:
+                    raise ValueError("登录启动开关无效")
+                installed = (
+                    Path.home()
+                    / "Library/LaunchAgents/io.github.calwade.wx-watcher.plist"
+                ).exists()
+                if installed != data["login_enabled"]:
+                    self.perform(
+                        "login-service",
+                        {"action": "install" if data["login_enabled"] else "uninstall"},
+                    )
+            return {"saved": True}
         if operation == "doctor":
             return self.doctor()
         if operation == "accounts":
@@ -387,8 +437,17 @@ class Controller:
                 job = api.request("/v1/jobs/" + id)
             if job["status"] != "completed":
                 raise RuntimeError("模型测试未完成，请查看 DSH 会话")
+            from .reply import parse_proposal
+
+            try:
+                proposal = parse_proposal(job["output"])
+            except (ValueError, TypeError, KeyError):
+                raise RuntimeError(
+                    "模型测试没有返回有效的回复建议格式，请检查 DSH 会话"
+                ) from None
             return {
                 "output": job["output"],
+                "proposal": proposal,
                 "usage": job.get("usage"),
                 "cost_meter": job.get("cost_meter"),
                 "tools": job.get("request_tool_count", job.get("visible_tools")),
@@ -544,6 +603,20 @@ class Controller:
             source = Path(__file__).resolve().parents[1] / "integrations/dsh/index.mjs"
         content = source.read_bytes()
         release = hashlib.sha256(content).hexdigest()[:16]
+        try:
+            current = self.dsh().request("/v1/status")
+            if (
+                current.get("ready")
+                and current.get("source_digest", "")[:16] == release
+            ):
+                return {
+                    "installed": True,
+                    "build": release,
+                    "ready": True,
+                    "reused": True,
+                }
+        except (OSError, RuntimeError):
+            pass
         target = self.state.home / "integrations/dsh" / release / "index.mjs"
         private_dir(target.parent)
         target.write_bytes(content)

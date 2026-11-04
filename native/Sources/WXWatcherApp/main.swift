@@ -1,6 +1,26 @@
 import AppKit
 import WebKit
 
+// Probe only the configured WeChat directory. The OS can register this native
+// application as the requester; no data from unrelated apps is inspected.
+func probeWeChatDirectory() -> Bool {
+    let fm = FileManager.default
+    let home = fm.homeDirectoryForCurrentUser
+    let container = home.appendingPathComponent("Library/Containers/com.tencent.xinWeChat")
+    let settingsHome = ProcessInfo.processInfo.environment["WX_WATCHER_HOME"].map { URL(fileURLWithPath: $0) }
+        ?? home.appendingPathComponent("Library/Application Support/WXWatcher")
+    var target = container.appendingPathComponent("Data/Documents/xwechat_files")
+    if let data = try? Data(contentsOf: settingsHome.appendingPathComponent("settings.json")),
+       let state = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+       let profiles = state["profiles"] as? [[String: Any]],
+       let profile = profiles.first(where: { ($0["id"] as? String) == (state["active_profile"] as? String) }),
+       let path = profile["db_root"] as? String,
+       path.hasPrefix(container.path + "/") {
+        target = URL(fileURLWithPath: path).appendingPathComponent("contact")
+    }
+    return (try? fm.contentsOfDirectory(atPath: target.path)) != nil
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScriptMessageHandler {
     var window: NSWindow!
     var web: WKWebView!
@@ -40,8 +60,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         window.title = isKeytool ? "WX Keytool · 微信凭据" : "WX Watcher · 微信消息助手"
         window.contentView = web
         window.center()
-        window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        if !CommandLine.arguments.contains("--background") {
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        }
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.button?.title = "WX"
         let menu = NSMenu()
@@ -88,6 +110,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
                        url.host == "127.0.0.1", url.scheme == "http" {
                         self.baseURL = URL(string: "http://127.0.0.1:\(url.port ?? 8767)")
                         self.web.load(URLRequest(url: url))
+                        if json["reused"] as? Bool != true {
+                            DispatchQueue.global(qos: .utility).async { _ = probeWeChatDirectory() }
+                        }
                     }
                 }
             }
@@ -122,7 +147,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
               let kind = request["kind"] as? String, let id = request["id"] as? String,
               id.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" }) else { return }
         if kind == "open-privacy" {
-            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!)
+            DispatchQueue.global(qos: .utility).async {
+                _ = probeWeChatDirectory()
+                DispatchQueue.main.async {
+                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!)
+                }
+            }
         } else if kind == "choose-file" || kind == "choose-directory" {
             let panel = NSOpenPanel()
             panel.canChooseDirectories = kind == "choose-directory"

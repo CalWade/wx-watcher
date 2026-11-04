@@ -84,7 +84,7 @@ function describeResult(op, value) {
       : "已自动完成可用的连接，请关闭此窗口处理页面中标出的事项。";
   if (op === "capture-preflight")
     return value.ready
-      ? "环境与当前登录账号检查通过，可以开始取钥。"
+      ? "环境检查通过。开始后请停在微信登录页，等待监听明确就绪再点击登录。"
       : "暂时不能开始取钥。" +
           (value.permission_hint ||
             value.account_hint ||
@@ -351,7 +351,7 @@ function keytool() {
     (p) => p.id === settings.active_profile,
   );
   $("#content").innerHTML =
-    `<section class="hero"><div><h2>一次连接，供本机项目复用</h2><p>主密钥保存在 macOS Keychain。这里显示连接和验证状态，不显示密钥内容。</p></div>${button("验证当前凭据", "verify-key")}</section><div class="two">${card("已有密钥 · 推荐优先验证", `<p class="muted">选择当前账号的 db_storage 目录和仅本人可读的密钥文件。</p><label>数据库目录<div class="field-action"><input id="db-root" value="${escape(profile?.db_root || "")}" placeholder="选择 db_storage 目录"><button id="pick-root">选择</button></div></label><label>密钥文件<div class="field-action"><input id="key-file" placeholder="选择现有密钥文件"><button id="pick-key">选择</button></div></label>${field("账号备注", "profile-label", profile?.label || "")}<div class="actions"><button id="import-key" class="primary">验证并存入 Keychain</button><button id="find-accounts">识别本机账号</button></div><div id="account-choices"></div><p class="note">新应用需要自己的数据读取权限，开发工具的权限不会自动继承。请到系统「完整磁盘访问权限」允许本应用，随后退出并重新打开。</p><button id="open-privacy">打开系统数据访问设置</button>`)}${card("首次取钥向导", `<p class="muted">没有可用密钥时使用。过程可能临时修改微信签名并附加调试器，完成后恢复官方客户端。</p><p class="note">先选好左侧数据库目录。环境检查不修改微信；点击开始取钥才申请管理员授权。</p><div class="actions"><button id="capture-check">检查取钥条件</button><button id="capture-start">开始取钥</button><button id="open-app-management">打开 App 管理设置</button></div><div id="capture-progress"></div><div class="actions"><button id="capture-cancel" disabled>取消并恢复</button></div>`)}</div>${card("取钥任务与恢复", `<p class="muted">中断的取钥任务可在这里继续查看。恢复完成后再重新取钥。</p><button id="refresh-captures">刷新取钥任务</button><div id="capture-sessions"></div>`)}${card("已连接账号", profile ? `<div class="row"><strong>${escape(profile.label)}</strong><span class="pill ok">Keychain 已保存</span></div><p class="muted">验证：${escape(profile.verification?.verified || 0)} / ${escape(profile.verification?.total || 0)} 份数据库</p><div class="actions"><button id="continue-setup" class="primary">继续配置消息助手</button></div>` : '<div class="empty">尚未连接微信账号</div>')}${card("加密备份与恢复", `<p class="muted">备份使用独立口令加密。请保管口令；工具不会保存备份口令。</p>${field("备份 / 恢复口令（至少 12 个字符）", "backup-password", "", "password")}<div class="actions"><button id="backup-key">下载加密备份</button><button id="restore-key">导入加密备份</button><input id="backup-file" type="file" accept=".json" hidden></div>`)}`;
+    `<section class="hero"><div><h2>一次连接，供本机项目复用</h2><p>主密钥保存在 macOS Keychain。这里显示连接和验证状态，不显示密钥内容。</p></div>${button("验证当前凭据", "verify-key")}</section><div class="two">${card("已有密钥 · 推荐优先验证", `<p class="muted">选择当前账号的 db_storage 目录和仅本人可读的密钥文件。</p><label>数据库目录<div class="field-action"><input id="db-root" value="${escape(profile?.db_root || "")}" placeholder="选择 db_storage 目录"><button id="pick-root">选择</button></div></label><label>密钥文件<div class="field-action"><input id="key-file" placeholder="选择现有密钥文件"><button id="pick-key">选择</button></div></label>${field("账号备注", "profile-label", profile?.label || "")}<div class="actions"><button id="import-key" class="primary">验证并存入 Keychain</button><button id="find-accounts">识别本机账号</button></div><div id="account-choices"></div><p class="note">新应用需要自己的数据读取权限，开发工具的权限不会自动继承。请到系统「完整磁盘访问权限」允许本应用，随后退出并重新打开。</p><button id="open-privacy">打开系统数据访问设置</button>`)}${card("首次取钥向导", `<p class="muted">没有可用密钥时使用。过程可能临时修改微信签名并附加调试器，完成后恢复官方客户端。</p><p class="note">先选好左侧数据库目录。环境检查不修改微信；点击开始才申请管理员授权。工具重开微信后，请停在登录页，确认后等待监听就绪，再点击微信登录。</p><div class="actions"><button id="capture-check">检查取钥条件</button><button id="capture-start">开始取钥</button><button id="open-app-management">打开 App 管理设置</button></div><div id="capture-progress"></div><div class="actions"><button id="capture-login-ready" hidden>我已停在登录页，准备监听</button><button id="capture-cancel" disabled>取消并恢复</button></div>`)}</div>${card("取钥任务与恢复", `<p class="muted">中断的取钥任务可在这里继续查看。恢复完成后再重新取钥。</p><button id="refresh-captures">刷新取钥任务</button><div id="capture-sessions"></div>`)}${card("已连接账号", profile ? `<div class="row"><strong>${escape(profile.label)}</strong><span class="pill ok">Keychain 已保存</span></div><p class="muted">验证：${escape(profile.verification?.verified || 0)} / ${escape(profile.verification?.total || 0)} 份数据库</p><div class="actions"><button id="continue-setup" class="primary">继续配置消息助手</button></div>` : '<div class="empty">尚未连接微信账号</div>')}${card("加密备份与恢复", `<p class="muted">备份使用独立口令加密。请保管口令；工具不会保存备份口令。</p>${field("备份 / 恢复口令（至少 12 个字符）", "backup-password", "", "password")}<div class="actions"><button id="backup-key">下载加密备份</button><button id="restore-key">导入加密备份</button><input id="backup-file" type="file" accept=".json" hidden></div>`)}`;
   bind("open-privacy", openPrivacy);
   bind("open-app-management", () => {
     if (window.webkit?.messageHandlers?.native)
@@ -481,6 +481,15 @@ async function loadCaptureSessions() {
       const text = document.createElement("p");
       text.textContent = r.message || r.phase;
       row.append(text);
+      if (r.error === "account_changed" && r.observed_db_roots?.length === 1) {
+        const useAccount = document.createElement("button");
+        useAccount.textContent = "使用本次识别到的账号目录";
+        useAccount.onclick = () => {
+          $("#db-root").value = r.observed_db_roots[0];
+          notice("已选用本次微信实际打开的账号目录，可以重新检查取钥条件。");
+        };
+        row.append(useAccount);
+      }
       const terminal = [
         "completed",
         "failed",
@@ -519,6 +528,21 @@ async function loadCaptureSessions() {
 }
 function watchCapture(id) {
   clearInterval(timer);
+  const loginReady = $("#capture-login-ready");
+  loginReady.hidden = true;
+  loginReady.onclick = async () => {
+    try {
+      await action(
+        "capture-login-ready",
+        { capture_id: id },
+        "确认已停在微信登录页",
+      );
+      $("#job-dialog").close();
+      loginReady.hidden = true;
+    } catch (error) {
+      notice(error.message, true);
+    }
+  };
   $("#capture-cancel").disabled = false;
   $("#capture-cancel").onclick = () =>
     action("capture-cancel", { capture_id: id }, "请求取消并恢复").catch((e) =>
@@ -533,8 +557,9 @@ function watchCapture(id) {
       const target = $("#capture-progress");
       if (!target) return;
       target.textContent = progress.message || progress.phase;
+      loginReady.hidden = progress.phase !== "awaiting_login_page";
       if (progress.phase === "ready_for_login")
-        notice("取钥监听已就绪，现在请按提示退出账号并重新登录。");
+        notice("取钥监听已就绪，现在可以点击微信登录并完成手机确认。");
       if (
         [
           "completed",

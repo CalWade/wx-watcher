@@ -44,16 +44,21 @@ class KeyFlow:
         from .discovery import active_roots
 
         active = active_roots()
+        result["wechat_logged_in"] = bool(active)
         result["active_account_matches"] = len(active) == 1 and active[0] == root_path
         result["ready"] = (
             result["ready"]
             and result.get("database_readable", False)
             and result.get("application_manageable", False)
-            and result["active_account_matches"]
+            and (not active or result["active_account_matches"])
         )
-        if not result["active_account_matches"]:
+        if active and not result["active_account_matches"]:
             result["account_hint"] = (
                 "请正常登录要取钥的账号，并选择当前微信实际打开的 db_storage，避免用旧账号资料验证"
+            )
+        elif not active:
+            result["account_hint"] = (
+                "微信可停在登录页准备。工具重开微信后，请先停在登录页并点击向导确认，等监听就绪再登录所选账号。"
             )
         elif not result.get("database_readable", False) and not result.get(
             "permission_hint"
@@ -66,8 +71,9 @@ class KeyFlow:
             "账号确认",
             "数据访问与 App 管理权限",
             "官方客户端备份",
+            "停在登录页并确认",
             "监听就绪",
-            "退出并重新登录",
+            "登录所选账号",
             "密钥验证",
             "恢复客户端",
             "Keychain 保存",
@@ -298,3 +304,11 @@ class KeyFlow:
             "cancel_requested": True,
             "message": "正在请求解除调试并恢复客户端，请等待恢复结果",
         }
+
+    def login_page_ready(self, id):
+        directory = self.directory(id)
+        progress = json.loads((directory / "progress.json").read_text())
+        if progress.get("phase") != "awaiting_login_page":
+            raise ValueError("当前不在登录页确认阶段，请按最新进度操作")
+        atomic_json(directory / "login-page-ready", {"confirmed": True})
+        return {"message": "正在安装取钥监听，请等待明确就绪提示后再点击微信登录。"}

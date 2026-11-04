@@ -506,6 +506,10 @@ class Controller:
             from .keyflow import KeyFlow
 
             return KeyFlow(self.state).cancel(str(data["capture_id"]))
+        if operation == "capture-login-ready":
+            from .keyflow import KeyFlow
+
+            return KeyFlow(self.state).login_page_ready(str(data["capture_id"]))
         if operation == "capture-sessions":
             from .keyflow import KeyFlow
 

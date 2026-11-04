@@ -1,8 +1,33 @@
 import Testing
 import Foundation
+import Darwin
+import GreenBubblesAcquire
 @testable import WXKeytool
 
 @Suite struct KeytoolTests {
+    @Test func loginPageGateHonorsConfirmationCancellationAndDeadline() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        #expect(throws: ToolError.invalid("login_page_confirmation_timed_out")) {
+            try waitForLoginPage(directory, ownerPID: getpid(), deadline: Date().addingTimeInterval(-1))
+        }
+        try Data().write(to: directory.appendingPathComponent("login-page-ready"))
+        try waitForLoginPage(directory, ownerPID: getpid(), deadline: Date().addingTimeInterval(1))
+        try Data().write(to: directory.appendingPathComponent("cancel"))
+        #expect(throws: CaptureError.cancelled) {
+            try waitForLoginPage(directory, ownerPID: getpid(), deadline: Date().addingTimeInterval(1))
+        }
+    }
+    @Test func accountTrackingIgnoresPreviousAccountCaches() {
+        let listing = """
+        n/example/old/db_storage/MMKV/storage_common
+        n/example/old/db_storage/message/message_0.kvdb-shm
+        n/example/current/db_storage/contact/contact.db
+        n/example/current/db_storage/message/message_0.db-wal
+        """
+        #expect(databaseRootsFromOpenFiles(listing) == ["/example/current/db_storage"])
+    }
     @Test func permissionProbePreservesBytesAndReportsDeniedAccess() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

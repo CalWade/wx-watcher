@@ -8,6 +8,7 @@
 - Standalone key tool, Keychain references and encrypted credential backup.
 - Pinned acquisition code, explicit progress, cancellation and recovery.
 - Check native data/app-management permissions before capture; retain precise preparation failures after restoration.
+- Separate login-page confirmation from login readiness; stop and restore on a detected account-directory change after candidate rejection.
 - Ignore old-account cache handles when identifying the account currently open in WeChat.
 - Conversation selection, local knowledge passages and reply rules.
 - DSH bridge deployment and model/cost-meter diagnostics.

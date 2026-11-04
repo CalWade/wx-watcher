@@ -159,6 +159,38 @@ func openWeChat(_ uid: uid_t) throws {
                                       "/usr/bin/open", "-a", "/Applications/WeChat.app"], code: "wechat_launch_failed")
 }
 
+func waitForLoginPage(_ directory: URL, ownerPID: Int32, deadline: Date) throws {
+    while Date() < deadline {
+        if FileManager.default.fileExists(atPath: directory.appendingPathComponent("cancel").path)
+            || ownerPID <= 1 || kill(ownerPID, 0) != 0 { throw CaptureError.cancelled }
+        if FileManager.default.fileExists(atPath: directory.appendingPathComponent("login-page-ready").path) { return }
+        Thread.sleep(forTimeInterval: 0.1)
+    }
+    throw ToolError.invalid("login_page_confirmation_timed_out")
+}
+
+func databaseRootsFromOpenFiles(_ listing: String) -> Set<String> {
+    var roots = Set<String>()
+    for line in listing.split(separator: "\n") where line.hasPrefix("n") {
+        let path = String(line.dropFirst())
+        guard path.range(of: #"/db_storage/(?:contact/contact|session/session|message/message_\d+)\.db(?:-wal)?$"#,
+                         options: .regularExpression) != nil,
+              let end = path.range(of: "/db_storage/") else { continue }
+        roots.insert(String(path[..<end.lowerBound]) + "/db_storage")
+    }
+    return roots
+}
+
+func currentlyOpenDatabaseRoots() -> Set<String> {
+    var roots = Set<String>()
+    for pid in (try? WeChatProcessLocator().processIDs()) ?? [] {
+        if let listing = try? system("/usr/sbin/lsof", ["-n", "-a", "-p", String(pid), "-Fn"]).1 {
+            roots.formUnion(databaseRootsFromOpenFiles(listing))
+        }
+    }
+    return roots
+}
+
 func runCaptureJob(_ path: String, recoverOnly: Bool = false) throws {
     guard geteuid() == 0 else { throw ToolError.invalid("capture_requires_system_authorization") }
     let lockFD = open("/var/run/io.github.calwade.wx-keytool.lock", O_CREAT | O_RDWR | O_NOFOLLOW, 0o600)
@@ -177,6 +209,8 @@ func runCaptureJob(_ path: String, recoverOnly: Bool = false) throws {
     var modified = false
     var keyReady = FileManager.default.fileExists(atPath: pending)
     var failure = ""
+    var observedRoots: [String] = []
+    let deadline = Date().addingTimeInterval(600)
     do {
     if recoverOnly {
         guard FileManager.default.fileExists(atPath: backup) else { throw ToolError.invalid("recovery_backup_missing") }
@@ -202,6 +236,8 @@ func runCaptureJob(_ path: String, recoverOnly: Bool = false) throws {
             try requireSystem("/usr/bin/codesign", ["--force", "--deep", "--sign", "-", app], code: "wechat_temporary_sign_failed")
             journal.write("opening_client", "正在以当前用户启动微信")
             try openWeChat(uid)
+            journal.write("awaiting_login_page", "微信已重新打开。请停在微信登录页，暂不点击登录；在向导点击「我已停在登录页，准备监听」。", ["can_cancel": true])
+            try waitForLoginPage(directory, ownerPID: ownerPID, deadline: deadline)
             let inventory = try DatabaseSaltInventory(root: directory.appendingPathComponent("samples"))
             guard !inventory.entries.isEmpty else { throw ToolError.invalid("database_samples_missing") }
             var capture = LLDBPassphraseCapture(lldbPath: lldbExecutable()!)
@@ -210,12 +246,18 @@ func runCaptureJob(_ path: String, recoverOnly: Bool = false) throws {
             }
             capture.outputHandler = { message in
                 if message.contains("capture ready") {
-                    journal.write("ready_for_login", "监听已就绪。请在微信退出账号并重新登录同一个账号。", ["can_cancel": true])
+                    journal.write("ready_for_login", "取钥监听已就绪。现在可以点击微信登录，并完成手机确认。请登录所选数据库对应的账号。", ["can_cancel": true])
+                } else if message.contains("exited; waiting") {
+                    journal.write("reattaching", "微信进程已退出，正在等待并连接新进程。请暂不点击登录。", ["can_cancel": true, "target_exited": true])
                 } else if message.contains("attaching") {
-                    journal.write("attaching", "正在连接微信进程，请等待就绪提示", ["can_cancel": true])
+                    let pid = Int(message.split(separator: " ").last ?? "") ?? 0
+                    journal.write("attaching", "正在连接微信进程，请等待就绪提示", ["can_cancel": true, "target_pid": pid])
+                } else if message.contains("attach completed") {
+                    journal.write("attached", "已连接微信进程，正在安装取钥断点", ["can_cancel": true])
+                } else if message.contains("breakpoint installed") {
+                    journal.write("armed", "取钥断点已安装，正在恢复微信运行", ["can_cancel": true])
                 }
             }
-            let deadline = Date().addingTimeInterval(600)
             while Date() < deadline {
                 let candidate = try capture.capture(timeoutSeconds: max(1, Int(deadline.timeIntervalSinceNow)))
                 var verified = 0
@@ -230,10 +272,21 @@ func runCaptureJob(_ path: String, recoverOnly: Bool = false) throws {
                     keyReady = true
                     break
                 }
-                journal.write("waiting", "候选未匹配当前账号，继续等待；请确认登录账号正确", ["can_cancel": true])
+                let roots = currentlyOpenDatabaseRoots()
+                if let expected = request?["db_root"] as? String, !roots.isEmpty, roots != [expected] {
+                    observedRoots = roots.sorted()
+                    journal.write("account_changed", "微信当前打开的账号目录与本次选择不同，正在停止取钥并恢复官方客户端。", ["verified": verified, "total": inventory.distinctSalts.count])
+                    throw ToolError.invalid("account_changed")
+                }
+                journal.write("waiting", "本次候选未通过数据库校验，仍未保存密钥。请查看账号和进程状态。", ["can_cancel": true, "verified": verified, "total": inventory.distinctSalts.count])
             }
             if !keyReady { failure = "capture_timed_out" }
         } catch CaptureError.cancelled { failure = "cancelled" }
+          catch CaptureError.timedOut { failure = "capture_timed_out" }
+          catch CaptureError.attachFailed(_) { failure = "debugger_attach_failed" }
+          catch CaptureError.lldbLaunchFailed { failure = "debugger_launch_failed" }
+          catch CaptureError.exitedWithoutCapture { failure = "debugger_exited_without_capture" }
+          catch CaptureError.noWeChatProcess { failure = "wechat_process_not_found" }
           catch let error as SystemStepError { failure = error.code; journal.recordFailure(error) }
           catch let ToolError.invalid(code) { failure = code }
           catch { failure = "capture_failed" }
@@ -278,10 +331,18 @@ func runCaptureJob(_ path: String, recoverOnly: Bool = false) throws {
             return
         }
     }
-    let failedMessage = failure == "wechat_temporary_sign_failed"
+    let failedMessage = failure == "account_changed"
+        ? "取钥期间微信打开了另一套账号目录，未保存候选密钥；官方微信已恢复。请选择当前账号的目录后再取钥。"
+        : failure == "login_page_confirmation_timed_out"
+        ? "等待登录页确认超时，官方微信已恢复，未保存密钥。"
+        : failure == "wechat_temporary_sign_failed"
         ? "临时调试签名未完成，官方微信已恢复。请检查本应用的 App 管理权限，并查看任务诊断。"
+        : failure == "debugger_attach_failed"
+        ? "调试器未完成附加或未在期限内恢复微信运行；官方微信已恢复，未保存密钥。"
+        : failure == "capture_timed_out"
+        ? "等待有效密钥超时，未保存密钥；官方微信已恢复。"
         : (failure == "wechat_launch_failed" ? "微信启动未完成，官方客户端已恢复。请查看任务诊断。" : "本次取钥已结束，官方客户端已恢复")
     journal.write(keyReady ? "captured" : (failure == "cancelled" ? "cancelled" : (recoverOnly ? "recovered" : "failed")),
                   keyReady ? "官方客户端已恢复，正在准备安全保存密钥" : (recoverOnly ? "官方客户端已恢复" : failedMessage),
-                  ["key_ready": keyReady, "official_restored": true, "error": failure])
+                  ["key_ready": keyReady, "official_restored": true, "error": failure, "observed_db_roots": observedRoots])
 }

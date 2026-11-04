@@ -40,6 +40,10 @@ def native_request(data: dict, executable: str = "", *, internal_read=False) -> 
     except ValueError:
         raise RuntimeError("原生凭据工具返回无效结果") from None
     if result.returncode != 0 or not answer.get("ok"):
+        if answer.get("error") == "database_access_denied":
+            raise PermissionError(
+                "macOS 尚未允许本应用读取微信数据。请在系统设置 → 隐私与安全性 → 完整磁盘访问权限中允许 WX Watcher，然后退出并重新打开本应用。已有密钥无需重新获取。"
+            )
         raise RuntimeError(
             "凭据操作失败：" + str(answer.get("error", "native_tool_failed"))
         )

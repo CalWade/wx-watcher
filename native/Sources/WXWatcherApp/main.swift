@@ -121,7 +121,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
               let request = message.body as? [String: Any],
               let kind = request["kind"] as? String, let id = request["id"] as? String,
               id.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" }) else { return }
-        if kind == "choose-file" || kind == "choose-directory" {
+        if kind == "open-privacy" {
+            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!)
+        } else if kind == "choose-file" || kind == "choose-directory" {
             let panel = NSOpenPanel()
             panel.canChooseDirectories = kind == "choose-directory"
             panel.canChooseFiles = kind == "choose-file"

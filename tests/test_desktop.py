@@ -3,11 +3,14 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from wx_watcher.appstate import AppState
 from wx_watcher.controller import Controller
+from wx_watcher.credentials import native_request
 from wx_watcher.desktop import create_desktop
 from wx_watcher.knowledge import select_passages
 
@@ -136,3 +139,23 @@ class KnowledgeTests(unittest.TestCase):
                 select_passages((b,), "example")
             with self.assertRaises(ValueError):
                 select_passages((Path(tmp) / "file.db",), "example")
+
+
+class CredentialDiagnosticTests(unittest.TestCase):
+    def test_denied_data_access_guides_permission_instead_of_recapture(self):
+        with (
+            patch(
+                "wx_watcher.credentials.native_tool",
+                return_value=Path("/example/wx-keytool"),
+            ),
+            patch(
+                "wx_watcher.credentials.subprocess.run",
+                return_value=SimpleNamespace(
+                    returncode=2, stdout='{"ok":false,"error":"database_access_denied"}'
+                ),
+            ),
+        ):
+            with self.assertRaises(PermissionError) as error:
+                native_request({"operation": "verify"})
+        self.assertIn("完整磁盘访问权限", str(error.exception))
+        self.assertIn("无需重新获取", str(error.exception))

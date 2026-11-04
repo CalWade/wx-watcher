@@ -75,6 +75,20 @@ class Controller:
             "platform": sys.platform,
         }
         try:
+            profile = self.state.profile()
+            with (Path(profile["db_root"]) / "contact/contact.db").open("rb") as stream:
+                checks["wechat_data_access"] = {"readable": len(stream.read(16)) == 16}
+        except PermissionError:
+            checks["wechat_data_access"] = {
+                "readable": False,
+                "hint": "请在系统完整磁盘访问权限中允许实际运行的 WX Watcher 应用，然后退出并重新打开",
+            }
+        except (OSError, ValueError):
+            checks["wechat_data_access"] = {
+                "readable": False,
+                "hint": "请先连接存在的微信数据库目录",
+            }
+        try:
             checks["keytool"] = native_request({"operation": "doctor"})
         except (OSError, RuntimeError) as exc:
             checks["keytool"] = {"ok": False, "error": str(exc)}

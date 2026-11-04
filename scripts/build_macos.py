@@ -235,6 +235,14 @@ def main():
         "notarized": False,
         "architecture": "arm64",
         "minimum_macos": minimum,
+        "source_commit": subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
+        ).strip(),
+        "source_dirty": bool(
+            subprocess.check_output(
+                ["git", "status", "--porcelain"], cwd=ROOT, text=True
+            ).strip()
+        ),
         "artifacts": [p.name for p in artifacts],
     }
     (DIST / "build-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")

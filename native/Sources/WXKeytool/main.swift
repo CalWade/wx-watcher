@@ -5,7 +5,7 @@ import CommonCrypto
 import Darwin
 import GreenBubblesAcquire
 
-enum ToolError: Error { case invalid(String) }
+enum ToolError: Error, Equatable { case invalid(String) }
 let service = "io.github.calwade.wx-watcher.account-key.v1"
 
 func output(_ value: [String: Any]) {
@@ -51,8 +51,20 @@ func saveKey(_ data: Data, _ id: String, serviceSecret: Bool = false) throws {
     guard status == errSecSuccess else { throw ToolError.invalid("keychain_write_\(status)") }
 }
 func verify(_ data: Data, root: String) throws -> [String: Any] {
+    let directory = URL(fileURLWithPath: root)
+    guard let handle = opendir(directory.path) else {
+        throw ToolError.invalid(errno == EPERM || errno == EACCES ? "database_access_denied" : "database_root_unavailable")
+    }
+    closedir(handle)
+    let contact = directory.appendingPathComponent("contact/contact.db")
+    let fd = open(contact.path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+    guard fd >= 0 else {
+        throw ToolError.invalid(errno == EPERM || errno == EACCES ? "database_access_denied" : "database_contact_missing")
+    }
+    close(fd)
     let secret = try PassphraseSecret(bytes: Array(data))
-    let inventory = try DatabaseSaltInventory(root: URL(fileURLWithPath: root))
+    let inventory = try DatabaseSaltInventory(root: directory)
+    guard !inventory.entries.isEmpty else { throw ToolError.invalid("no_readable_database_pages") }
     var verified = 0
     for sample in inventory.saltVerificationSamples {
         let key = try SQLCipherKeyVerifier.deriveEncryptionKey(passphrase: secret, salt: sample.salt)

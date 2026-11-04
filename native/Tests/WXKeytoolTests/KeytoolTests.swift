@@ -6,7 +6,20 @@ import Foundation
     @Test func keyValidation() throws {
         #expect(try keyData(String(repeating: "ab", count: 32)).count == 32)
         #expect(throws: ToolError.self) { try keyData("bad") }
+        #expect(throws: ToolError.self) { try keyData(String(repeating: "Ａ", count: 64)) }
         #expect(throws: ToolError.self) { try keyQuery("../../private") }
+    }
+    @Test func missingDataAccessIsNotReportedAsWrongKey() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: directory.path)
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        #expect(throws: ToolError.invalid("database_access_denied")) {
+            try verify(Data(repeating: 0, count: 32), root: directory.path)
+        }
     }
     @Test func backupDerivationRejectsShortPasswords() {
         #expect(throws: ToolError.self) { try derive("short", salt: Data(repeating: 1, count: 16)) }

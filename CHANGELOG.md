@@ -17,6 +17,7 @@
 - Bounded service supervision with reader readiness gating, retained cursors and explicit task review/retry.
 - Per-application macOS data access diagnostics and native privacy-settings entry.
 - App build with dependency-derived OS floor, CI and installation/maintenance/developer documentation.
+- Verified the installed credential wizard's fresh capture, 19/19 database validation, official-client restoration and Keychain readback on the pinned Mac environment.
 
 Release qualification is recorded separately. This list is not proof of every
 platform/client combination or a full 24-hour run.

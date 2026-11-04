@@ -1,0 +1,13 @@
+group_name = ""
+# 首次精确解析后可填写原生群 ID，避免重名。
+chat_id = ""
+# 填本人账号的 db_storage 绝对路径；空值只在恰有一个账号时自动选择。
+db_root = ""
+# 既有主密钥文件：64 个十六进制字符，或 {"passphrase": "..."}。
+# 服务不会自行提钥、重签微信、连接微信进程或关闭系统保护。
+key_file = ".runtime/master-key.txt"
+state_dir = ".runtime"
+backend = "sqlcipher"
+sqlcipher = "/opt/homebrew/bin/sqlcipher"
+poll_interval = 1.0
+port = 8765

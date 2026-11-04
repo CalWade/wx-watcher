@@ -1,0 +1,52 @@
+# 本地接口与项目复用
+
+## 只读消息 API
+
+读取服务绑定 `127.0.0.1`，要求 `Authorization: Bearer <token>`。
+token 位于配置的 state_dir/api-token.txt，权限 600。不要把真实 token 放入公开命令、Issue 或日志。
+
+| 请求 | 返回 |
+| --- | --- |
+| GET /v1/status | 数据源状态、scope_id、最后成功扫描、错误类别 |
+| GET /v1/messages?limit=50 | 指定会话的已采集历史 |
+| GET /v1/events?after=0&limit=200 | 持久化事件与 next_cursor |
+
+没有任意 SQL、文件读取、进程控制或微信发送接口。其他 HTTP 方法返回 405。
+消息源未就绪返回 503，不把错误伪装成“没有新消息”。
+消费者处理成功后保存 next_cursor；重试原游标可以重放，不会提前删除事件。
+分片编号、账号和库重建代次参与唯一标识，不能仅用 local_id 当全局 ID。
+
+源码调试：
+
+```sh
+uv run wx-watcher --config config/local.toml doctor
+uv run wx-watcher --config config/local.toml serve
+uv run python scripts/client.py --config config/local.toml status
+```
+
+配置示例见 `config/example.toml`。新应用的配置由向导写入私有目录。
+
+## 凭据复用
+
+新读取配置可用 `key_ref` 替代文件密钥，并通过 `WX_KEYTOOL_BIN` 或 `keytool` 指定原生访问器。
+主密钥只通过私有进程管道进入本机解密组件，不进入 HTTP。
+默认建议复用只读消息 API；必须自行解密的可信本地组件才需要内部密钥读取能力。
+
+## DSH bridge
+
+Bearer 认证，默认 8766：
+
+- GET /v1/status
+- POST /v1/jobs，JSON `{id: <64-hex>, prompt: <bounded text>}`
+- GET /v1/jobs/<id>
+
+同 ID 相同 prompt 复用，冲突 409，队列满 429。
+持久化状态包括 queued、running、completed、failed、interrupted。
+正常响应不返回模型渠道凭据。运行中断时不自动再次生成。
+
+## 管理台 API
+
+管理台是本机应用内部接口，不是远程管理协议。
+使用受保护的启动链接完成一次会话交换，随后使用 HttpOnly / SameSite cookie。
+修改请求检查 Host、Origin、JSON 类型和自定义请求头；外部网页不能直接配置服务。
+原生文件选择消息仅接受当前主框架的受信任本机来源。

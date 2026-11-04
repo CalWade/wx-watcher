@@ -1,0 +1,19 @@
+# Changelog
+
+## 0.2.0
+
+- Mac launcher/menu bar and authenticated local setup console.
+- Standalone key tool, Keychain references and encrypted credential backup.
+- Pinned acquisition code, explicit progress, cancellation and recovery.
+- Conversation selection, local knowledge passages and reply rules.
+- DSH bridge deployment and model/cost-meter diagnostics.
+- Feishu API transport alongside existing Lark CLI support.
+- Durable batching and daily model-call limits.
+- App build, CI and installation/maintenance/developer documentation.
+
+Release qualification is recorded separately. This list is not proof of every
+platform/client combination or a full 24-hour run.
+
+## 0.1.0
+
+- Read-only encrypted DB/WAL API, persistent events, DSH and Feishu test integration.

@@ -1,0 +1,6 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>WX Watcher · 微信消息助手</title><link rel="stylesheet" href="/style.css"></head>
+<body><aside><a class="brand" href="#overview"><span class="logo">W</span><span>WX Watcher<small>本地微信消息助手</small></span></a><nav aria-label="主导航"><button data-page="overview">概览</button><button data-page="setup">连接与配置</button><button data-page="keytool">微信凭据</button><button data-page="records">回复建议</button><button data-page="knowledge">业务资料</button><button data-page="diagnostics">运行诊断</button></nav><div class="aside-bottom"><span class="status-dot"></span>数据读取在本机进行<small>模型与飞书按你的配置接收内容</small><a href="https://github.com/CalWade/wx-watcher" target="_blank" rel="noreferrer">项目与使用文档 ↗</a></div></aside>
+<main><header><div><span class="eyebrow">WORKSPACE / 本机工作区</span><h1 id="title">连接与配置</h1></div><div id="health" class="pill">正在连接</div></header><div id="notice" role="status" aria-live="polite"></div><div id="content"><p>正在打开本地工作区…</p></div><footer>WX Watcher 0.2.0 · 微信端只读 · 建议请人工确认后回复客户</footer></main>
+<dialog id="job-dialog"><h2 id="job-title">正在处理</h2><p id="job-progress">请稍候，正在执行本地操作。</p><pre id="job-result"></pre><button id="job-close" class="primary" disabled>完成</button></dialog>
+<script src="/app.js" defer></script></body></html>

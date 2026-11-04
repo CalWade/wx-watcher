@@ -1,0 +1,7 @@
+{
+  "name": "dsh-wx-reply-agent",
+  "version": "0.2.0",
+  "type": "module",
+  "main": "index.mjs",
+  "description": "Local reply-only DSH bridge for wx-watcher; reuses the desktop LLM and cost-meter services"
+}

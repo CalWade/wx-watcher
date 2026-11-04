@@ -1,0 +1,31 @@
+name: Build macOS release
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.11.28'
+          python-version: '3.12'
+      - run: brew install sqlcipher
+      - run: uv sync --frozen --group build
+      - run: uv run python scripts/verify.py
+      - run: swift test --package-path native -c release
+      - run: uv run python scripts/check_release.py
+      - run: uv run python scripts/build_macos.py
+      - run: uv run python scripts/check_release.py dist/*.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wx-watcher-macos-arm64
+          path: |
+            dist/*.zip
+            dist/*.dmg
+            dist/SHA256SUMS
+            dist/build-manifest.json

@@ -1,0 +1,178 @@
+import Foundation
+import Security
+import CryptoKit
+import CommonCrypto
+import Darwin
+import GreenBubblesAcquire
+
+enum ToolError: Error { case invalid(String) }
+let service = "io.github.calwade.wx-watcher.account-key.v1"
+
+func output(_ value: [String: Any]) {
+    if let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]),
+       let text = String(data: data, encoding: .utf8) { print(text) }
+}
+func text(_ d: [String: Any], _ name: String) throws -> String {
+    guard let v = d[name] as? String, !v.isEmpty else { throw ToolError.invalid("missing_" + name) }
+    return v
+}
+func keyData(_ hex: String) throws -> Data {
+    guard hex.count == 64, hex.allSatisfy({ $0.isHexDigit }) else { throw ToolError.invalid("invalid_key") }
+    return Data(stride(from: 0, to: 64, by: 2).map { i in
+        let a = hex.index(hex.startIndex, offsetBy: i)
+        return UInt8(hex[a..<hex.index(a, offsetBy: 2)], radix: 16)!
+    })
+}
+func keyQuery(_ id: String) throws -> [CFString: Any] {
+    guard UUID(uuidString: id) != nil else { throw ToolError.invalid("invalid_key_reference") }
+    return [kSecClass: kSecClassGenericPassword, kSecAttrService: service,
+            kSecAttrAccount: id]
+}
+func loadValue(_ id: String) throws -> Data {
+    var query = try keyQuery(id)
+    query[kSecReturnData] = true
+    query[kSecMatchLimit] = kSecMatchLimitOne
+    var result: CFTypeRef?
+    let status = SecItemCopyMatching(query as CFDictionary, &result)
+    guard status == errSecSuccess, let data = result as? Data, !data.isEmpty, data.count <= 4096
+    else { throw ToolError.invalid("keychain_read_\(status)") }
+    return data
+}
+func loadKey(_ id: String) throws -> Data {
+    let data = try loadValue(id)
+    guard data.count == 32 else { throw ToolError.invalid("invalid_key_length") }
+    return data
+}
+func saveKey(_ data: Data, _ id: String) throws {
+    var query = try keyQuery(id)
+    query[kSecValueData] = data
+    query[kSecAttrLabel] = "WX Watcher account database key"
+    let status = SecItemAdd(query as CFDictionary, nil)
+    guard status == errSecSuccess else { throw ToolError.invalid("keychain_write_\(status)") }
+}
+func verify(_ data: Data, root: String) throws -> [String: Any] {
+    let secret = try PassphraseSecret(bytes: Array(data))
+    let inventory = try DatabaseSaltInventory(root: URL(fileURLWithPath: root))
+    var verified = 0
+    for sample in inventory.saltVerificationSamples {
+        let key = try SQLCipherKeyVerifier.deriveEncryptionKey(passphrase: secret, salt: sample.salt)
+        if try SQLCipherKeyVerifier.verify(encryptionKey: key, page1: sample.page1) { verified += 1 }
+    }
+    guard verified > 0 else { throw ToolError.invalid("key_does_not_match_database") }
+    return ["verified": verified, "total": inventory.distinctSalts.count,
+            "all_verified": verified == inventory.distinctSalts.count]
+}
+func derive(_ password: String, salt: Data) throws -> SymmetricKey {
+    guard password.count >= 12, password.utf8.count <= 1024 else { throw ToolError.invalid("backup_password_minimum_12_characters") }
+    var result = [UInt8](repeating: 0, count: 32)
+    let bytes = Array(password.utf8)
+    let status = bytes.withUnsafeBytes { p in salt.withUnsafeBytes { s in
+        CCKeyDerivationPBKDF(CCPBKDFAlgorithm(kCCPBKDF2), p.baseAddress?.assumingMemoryBound(to: Int8.self),
+            bytes.count, s.baseAddress?.assumingMemoryBound(to: UInt8.self), salt.count,
+            CCPseudoRandomAlgorithm(kCCPRFHmacAlgSHA512), 256000, &result, 32)
+    }}
+    guard status == kCCSuccess else { throw ToolError.invalid("backup_kdf_failed") }
+    return SymmetricKey(data: result)
+}
+func random(_ size: Int) throws -> Data {
+    var data = Data(count: size)
+    guard data.withUnsafeMutableBytes({ SecRandomCopyBytes(kSecRandomDefault, size, $0.baseAddress!) }) == errSecSuccess
+    else { throw ToolError.invalid("random_failed") }
+    return data
+}
+
+func request(_ input: [String: Any], internalRead: Bool) throws -> [String: Any] {
+    let op = try text(input, "operation")
+    switch op {
+    case "doctor":
+        let candidates = [ProcessInfo.processInfo.environment["GREENBUBBLES_LLDB_PATH"],
+            "/Applications/Xcode.app/Contents/Developer/usr/bin/lldb", "/usr/bin/lldb"].compactMap { $0 }
+        var chain: SecKeychain?
+        let defaultStatus = SecKeychainCopyDefault(&chain)
+        var keychainStatus: SecKeychainStatus = 0
+        let probeStatus = chain.map { SecKeychainGetStatus($0, &keychainStatus) } ?? errSecNoSuchKeychain
+        return ["ok": true, "version": "0.2.0", "platform": "macOS",
+                "os": ProcessInfo.processInfo.operatingSystemVersionString,
+                "lldb": candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) ?? "",
+                "keychain_service": service, "keychain_default_status": defaultStatus,
+                "keychain_probe_status": probeStatus, "keychain_flags": keychainStatus]
+    case "capture_preflight": return capturePreflight()
+    case "verify":
+        let data: Data
+        if input["key_ref"] != nil { data = try loadKey(text(input, "key_ref")) }
+        else { data = try keyData(text(input, "key_hex")) }
+        return try verify(data, root: text(input, "db_root")).merging(["ok": true]) { a, _ in a }
+    case "store":
+        let data = try keyData(text(input, "key_hex"))
+        let report = try verify(data, root: text(input, "db_root"))
+        let id = UUID().uuidString.lowercased()
+        try saveKey(data, id)
+        do {
+            guard try loadKey(id) == data else { throw ToolError.invalid("keychain_readback_failed") }
+        } catch {
+            _ = SecItemDelete(try keyQuery(id) as CFDictionary)
+            throw error
+        }
+        return report.merging(["ok": true, "key_ref": id]) { a, _ in a }
+    case "read":
+        guard internalRead else { throw ToolError.invalid("read_requires_internal_read_flag") }
+        let data = try loadKey(text(input, "key_ref"))
+        return ["ok": true, "key_hex": data.map { String(format: "%02x", $0) }.joined()]
+    case "store_secret":
+        let secret = try text(input, "secret")
+        guard secret.utf8.count <= 4096 else { throw ToolError.invalid("secret_too_large") }
+        let id = UUID().uuidString.lowercased()
+        try saveKey(Data(secret.utf8), id)
+        return ["ok": true, "key_ref": id]
+    case "read_secret":
+        guard internalRead else { throw ToolError.invalid("read_requires_internal_read_flag") }
+        guard let secret = String(data: try loadValue(text(input, "key_ref")), encoding: .utf8)
+        else { throw ToolError.invalid("invalid_secret") }
+        return ["ok": true, "secret": secret]
+    case "delete":
+        let status = SecItemDelete(try keyQuery(text(input, "key_ref")) as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else { throw ToolError.invalid("keychain_\(status)") }
+        return ["ok": true]
+    case "export_backup":
+        let data = try loadKey(text(input, "key_ref"))
+        let salt = try random(16)
+        let key = try derive(text(input, "password"), salt: salt)
+        let sealed = try AES.GCM.seal(data, using: key, authenticating: Data("wx-keytool-backup-v1".utf8))
+        return ["ok": true, "backup": ["format": "wx-keytool-backup-v1", "kdf": "PBKDF2-SHA512",
+            "rounds": 256000, "salt": salt.base64EncodedString(), "sealed": sealed.combined!.base64EncodedString()]]
+    case "import_backup":
+        guard let backup = input["backup"] as? [String: Any], backup["format"] as? String == "wx-keytool-backup-v1",
+              backup["rounds"] as? Int == 256000,
+              let salt = Data(base64Encoded: try text(backup, "salt")), salt.count == 16,
+              let sealed = Data(base64Encoded: try text(backup, "sealed")), sealed.count < 1024
+        else { throw ToolError.invalid("invalid_backup") }
+        let data = try AES.GCM.open(AES.GCM.SealedBox(combined: sealed),
+            using: derive(text(input, "password"), salt: salt), authenticating: Data("wx-keytool-backup-v1".utf8))
+        guard data.count == 32 else { throw ToolError.invalid("invalid_backup_key") }
+        let report = try verify(data, root: text(input, "db_root"))
+        let id = UUID().uuidString.lowercased()
+        try saveKey(data, id)
+        return report.merging(["ok": true, "key_ref": id]) { a, _ in a }
+    default: throw ToolError.invalid("unknown_operation")
+    }
+}
+
+if let index = CommandLine.arguments.firstIndex(of: "--capture-job"), CommandLine.arguments.count > index+1 {
+    do { try runCaptureJob(CommandLine.arguments[index+1], recoverOnly: CommandLine.arguments.contains("--recover")) }
+    catch let ToolError.invalid(code) { output(["ok": false, "error": code]); exit(2) }
+    catch { output(["ok": false, "error": "capture_transaction_failed"]); exit(2) }
+} else if CommandLine.arguments.contains("--help") {
+    print("wx-keytool 0.2.0 — local WeChat database credentials\nRead one JSON request from stdin: doctor, verify, store, export_backup, import_backup, delete.\nSecret input is never accepted in process arguments. Internal reader use requires --internal-read.")
+} else {
+    do {
+        let raw = FileHandle.standardInput.readDataToEndOfFile()
+        guard raw.count <= 1_048_576,
+              let input = try JSONSerialization.jsonObject(with: raw) as? [String: Any]
+        else { throw ToolError.invalid("invalid_request") }
+        output(try request(input, internalRead: CommandLine.arguments.contains("--internal-read")))
+    } catch let ToolError.invalid(code) {
+        output(["ok": false, "error": code]); exit(2)
+    } catch {
+        output(["ok": false, "error": "operation_failed", "type": String(describing: type(of: error))]); exit(2)
+    }
+}

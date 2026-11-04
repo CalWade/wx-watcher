@@ -1,0 +1,11 @@
+reader_config = "config/local.toml"
+state_dir = ".runtime/agent"
+dsh_token_file = "~/.dsh/storages/wx-reply-agent/token"
+dsh_port = 8766
+context_limit = 20
+poll_interval = 1
+feishu_chat_id = ""
+feishu_chat_name = ""
+send_enabled = false
+lark_cli = "/opt/homebrew/bin/lark-cli"
+business_context = ""

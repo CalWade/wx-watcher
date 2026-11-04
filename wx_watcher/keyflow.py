@@ -35,25 +35,36 @@ class KeyFlow:
         self.jobs = Path.home() / "Library/Application Support/WXWatcher/keytool/jobs"
 
     def preflight(self, root: str):
-        result = native_request({"operation": "capture_preflight"})
         root_path = Path(root).expanduser().resolve()
-        result["database_readable"] = (root_path / "contact/contact.db").is_file()
+        # Probe in the actual bundled native tool. A source Python process can
+        # inherit different privacy permissions and must not stand in for it.
+        result = native_request(
+            {"operation": "capture_preflight", "db_root": str(root_path)}
+        )
         from .discovery import active_roots
 
         active = active_roots()
         result["active_account_matches"] = len(active) == 1 and active[0] == root_path
         result["ready"] = (
             result["ready"]
-            and result["database_readable"]
+            and result.get("database_readable", False)
+            and result.get("application_manageable", False)
             and result["active_account_matches"]
         )
         if not result["active_account_matches"]:
             result["account_hint"] = (
                 "请正常登录要取钥的账号，并选择当前微信实际打开的 db_storage，避免用旧账号资料验证"
             )
+        elif not result.get("database_readable", False) and not result.get(
+            "permission_hint"
+        ):
+            result["permission_hint"] = (
+                "取钥工具未确认数据访问权限，请更新当前安装版后重新检查。"
+            )
         result["steps"] = [
             "环境检查",
             "账号确认",
+            "数据访问与 App 管理权限",
             "官方客户端备份",
             "监听就绪",
             "退出并重新登录",
@@ -68,7 +79,9 @@ class KeyFlow:
             report = self.preflight(root)
             if not report["ready"]:
                 raise ValueError(
-                    "取钥前置条件未通过，请先查看环境检查；当前仅允许已验证的微信构建"
+                    report.get("permission_hint")
+                    or report.get("account_hint")
+                    or "取钥前置条件未通过，请先查看环境检查；当前仅允许已验证的微信构建"
                 )
             private_dir(self.jobs)
             for job in self.jobs.iterdir():
@@ -133,6 +146,7 @@ class KeyFlow:
                 ["/usr/bin/osascript", "-e", script],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                cwd=directory,
             )
 
             def finish():
@@ -223,6 +237,7 @@ class KeyFlow:
             ],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            cwd=directory,
         )
         return {"capture_id": id, "recovery_requested": True}
 

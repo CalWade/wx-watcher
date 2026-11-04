@@ -3,6 +3,21 @@ import Foundation
 @testable import WXKeytool
 
 @Suite struct KeytoolTests {
+    @Test func permissionProbePreservesBytesAndReportsDeniedAccess() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("permission-probe")
+        let bytes = Data("unchanged permission fixture".utf8)
+        try bytes.write(to: file)
+        #expect(probeFileAccess(file.path, write: true).allowed)
+        #expect(try Data(contentsOf: file) == bytes)
+        try FileManager.default.setAttributes([.posixPermissions: 0o400], ofItemAtPath: file.path)
+        let access = probeFileAccess(file.path, write: true)
+        #expect(!access.allowed)
+        #expect(access.error == EACCES)
+        #expect(try Data(contentsOf: file) == bytes)
+    }
     @Test func keyValidation() throws {
         #expect(try keyData(String(repeating: "ab", count: 32)).count == 32)
         #expect(throws: ToolError.self) { try keyData("bad") }

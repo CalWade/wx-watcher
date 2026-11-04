@@ -86,7 +86,8 @@ function describeResult(op, value) {
     return value.ready
       ? "环境与当前登录账号检查通过，可以开始取钥。"
       : "暂时不能开始取钥。" +
-          (value.account_hint ||
+          (value.permission_hint ||
+            value.account_hint ||
             "请展开详细结果，检查微信版本、调试器与数据读取权限。");
   if (op === "test-dsh")
     return `模型已返回建议；请求工具数：${value.tools}。费用统计：${value.cost_meter?.found ? "已记账" : "尚未找到，请检查 dsh-cost-meter"}。`;
@@ -350,8 +351,19 @@ function keytool() {
     (p) => p.id === settings.active_profile,
   );
   $("#content").innerHTML =
-    `<section class="hero"><div><h2>一次连接，供本机项目复用</h2><p>主密钥保存在 macOS Keychain。这里显示连接和验证状态，不显示密钥内容。</p></div>${button("验证当前凭据", "verify-key")}</section><div class="two">${card("已有密钥 · 推荐优先验证", `<p class="muted">选择当前账号的 db_storage 目录和仅本人可读的密钥文件。</p><label>数据库目录<div class="field-action"><input id="db-root" value="${escape(profile?.db_root || "")}" placeholder="选择 db_storage 目录"><button id="pick-root">选择</button></div></label><label>密钥文件<div class="field-action"><input id="key-file" placeholder="选择现有密钥文件"><button id="pick-key">选择</button></div></label>${field("账号备注", "profile-label", profile?.label || "")}<div class="actions"><button id="import-key" class="primary">验证并存入 Keychain</button><button id="find-accounts">识别本机账号</button></div><div id="account-choices"></div><p class="note">新应用需要自己的数据读取权限，开发工具的权限不会自动继承。请到系统「完整磁盘访问权限」允许本应用，随后退出并重新打开。</p><button id="open-privacy">打开系统数据访问设置</button>`)}${card("首次取钥向导", `<p class="muted">没有可用密钥时使用。过程可能临时修改微信签名并附加调试器，完成后恢复官方客户端。</p><p class="note">先选好左侧数据库目录。环境检查不修改微信；点击开始取钥才申请管理员授权。</p><div class="actions"><button id="capture-check">检查取钥条件</button><button id="capture-start">开始取钥</button></div><div id="capture-progress"></div><div class="actions"><button id="capture-cancel" disabled>取消并恢复</button></div>`)}</div>${card("取钥任务与恢复", `<p class="muted">中断的取钥任务可在这里继续查看。恢复完成后再重新取钥。</p><button id="refresh-captures">刷新取钥任务</button><div id="capture-sessions"></div>`)}${card("已连接账号", profile ? `<div class="row"><strong>${escape(profile.label)}</strong><span class="pill ok">Keychain 已保存</span></div><p class="muted">验证：${escape(profile.verification?.verified || 0)} / ${escape(profile.verification?.total || 0)} 份数据库</p><div class="actions"><button id="continue-setup" class="primary">继续配置消息助手</button></div>` : '<div class="empty">尚未连接微信账号</div>')}${card("加密备份与恢复", `<p class="muted">备份使用独立口令加密。请保管口令；工具不会保存备份口令。</p>${field("备份 / 恢复口令（至少 12 个字符）", "backup-password", "", "password")}<div class="actions"><button id="backup-key">下载加密备份</button><button id="restore-key">导入加密备份</button><input id="backup-file" type="file" accept=".json" hidden></div>`)}`;
+    `<section class="hero"><div><h2>一次连接，供本机项目复用</h2><p>主密钥保存在 macOS Keychain。这里显示连接和验证状态，不显示密钥内容。</p></div>${button("验证当前凭据", "verify-key")}</section><div class="two">${card("已有密钥 · 推荐优先验证", `<p class="muted">选择当前账号的 db_storage 目录和仅本人可读的密钥文件。</p><label>数据库目录<div class="field-action"><input id="db-root" value="${escape(profile?.db_root || "")}" placeholder="选择 db_storage 目录"><button id="pick-root">选择</button></div></label><label>密钥文件<div class="field-action"><input id="key-file" placeholder="选择现有密钥文件"><button id="pick-key">选择</button></div></label>${field("账号备注", "profile-label", profile?.label || "")}<div class="actions"><button id="import-key" class="primary">验证并存入 Keychain</button><button id="find-accounts">识别本机账号</button></div><div id="account-choices"></div><p class="note">新应用需要自己的数据读取权限，开发工具的权限不会自动继承。请到系统「完整磁盘访问权限」允许本应用，随后退出并重新打开。</p><button id="open-privacy">打开系统数据访问设置</button>`)}${card("首次取钥向导", `<p class="muted">没有可用密钥时使用。过程可能临时修改微信签名并附加调试器，完成后恢复官方客户端。</p><p class="note">先选好左侧数据库目录。环境检查不修改微信；点击开始取钥才申请管理员授权。</p><div class="actions"><button id="capture-check">检查取钥条件</button><button id="capture-start">开始取钥</button><button id="open-app-management">打开 App 管理设置</button></div><div id="capture-progress"></div><div class="actions"><button id="capture-cancel" disabled>取消并恢复</button></div>`)}</div>${card("取钥任务与恢复", `<p class="muted">中断的取钥任务可在这里继续查看。恢复完成后再重新取钥。</p><button id="refresh-captures">刷新取钥任务</button><div id="capture-sessions"></div>`)}${card("已连接账号", profile ? `<div class="row"><strong>${escape(profile.label)}</strong><span class="pill ok">Keychain 已保存</span></div><p class="muted">验证：${escape(profile.verification?.verified || 0)} / ${escape(profile.verification?.total || 0)} 份数据库</p><div class="actions"><button id="continue-setup" class="primary">继续配置消息助手</button></div>` : '<div class="empty">尚未连接微信账号</div>')}${card("加密备份与恢复", `<p class="muted">备份使用独立口令加密。请保管口令；工具不会保存备份口令。</p>${field("备份 / 恢复口令（至少 12 个字符）", "backup-password", "", "password")}<div class="actions"><button id="backup-key">下载加密备份</button><button id="restore-key">导入加密备份</button><input id="backup-file" type="file" accept=".json" hidden></div>`)}`;
   bind("open-privacy", openPrivacy);
+  bind("open-app-management", () => {
+    if (window.webkit?.messageHandlers?.native)
+      window.webkit.messageHandlers.native.postMessage({
+        kind: "open-app-management",
+        id: crypto.randomUUID(),
+      });
+    else
+      notice(
+        "请打开系统设置 → 隐私与安全性 → App 管理，允许实际运行取钥工具的应用。",
+      );
+  });
   bind("find-accounts", async () => {
     const rows = await action("accounts", {}, "识别本机账号");
     $("#account-choices").replaceChildren(

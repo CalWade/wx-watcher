@@ -7,6 +7,8 @@
 - Native privacy registration probe, single-page login options and available-port selection.
 - Standalone key tool, Keychain references and encrypted credential backup.
 - Pinned acquisition code, explicit progress, cancellation and recovery.
+- Check native data/app-management permissions before capture; retain precise preparation failures after restoration.
+- Ignore old-account cache handles when identifying the account currently open in WeChat.
 - Conversation selection, local knowledge passages and reply rules.
 - DSH bridge deployment and model/cost-meter diagnostics.
 - Feishu API transport alongside existing Lark CLI support.

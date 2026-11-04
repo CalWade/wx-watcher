@@ -11,7 +11,7 @@
 - DSH bridge deployment and model/cost-meter diagnostics.
 - Feishu API transport alongside existing Lark CLI support.
 - Durable batching and daily model-call limits.
-- Bounded service supervision, retained event cursors and explicit task review/retry.
+- Bounded service supervision with reader readiness gating, retained cursors and explicit task review/retry.
 - Per-application macOS data access diagnostics and native privacy-settings entry.
 - App build with dependency-derived OS floor, CI and installation/maintenance/developer documentation.
 

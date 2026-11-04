@@ -150,6 +150,13 @@ class Feishu:
             if message.get("message_id") != message_id or message.get("deleted"):
                 continue
             content = message.get("content", message.get("body", {}).get("content", ""))
+            # CLI shortcuts unwrap text; the native API keeps JSON in body.content.
+            if (
+                self.transport == "cli"
+                and message.get("msg_type") == "text"
+                and content == expected_text
+            ):
+                return True
             try:
                 text = json.loads(content).get("text")
             except (ValueError, TypeError, AttributeError):

@@ -5,6 +5,18 @@ import GreenBubblesAcquire
 @testable import WXKeytool
 
 @Suite struct KeytoolTests {
+    @Test func clientShutdownIncludesBundleHelpersAndExcludesOtherApps() {
+        let listing = """
+        12 501 /Applications/WeChat.app/Contents/MacOS/WeChat
+        13 501 /Applications/WeChat.app/Contents/MacOS/WeChatAppEx.app/Contents/MacOS/WeChatAppEx
+        14 501 /Applications/WeChat.app/Contents/MacOS/Helpers/WeChat Helper (GPU)
+        15 501 /Applications/WeChat.app/Contents/Frameworks/crashpad_handler
+        16 501 /Applications/WeChat.app.old/Contents/MacOS/WeChat
+        17 501 /Applications/Other.app/Contents/MacOS/Other
+        """
+        #expect(weChatBundleProcesses(listing).map(\.pid) == [12, 13, 14, 15])
+        #expect(weChatBundleProcesses("18 502 /Applications/WeChat.app/Contents/MacOS/WeChat").first?.uid == 502)
+    }
     @Test func loginPageGateHonorsConfirmationCancellationAndDeadline() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

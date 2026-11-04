@@ -141,15 +141,29 @@ func validateJobDirectory(_ path: String) throws -> (URL, uid_t) {
     return (dir, uid)
 }
 
-func stopOwnedWeChat(_ uid: uid_t) throws {
-    for pid in (try? WeChatProcessLocator().processIDs()) ?? [] {
-        let owner = try system("/bin/ps", ["-p", String(pid), "-o", "uid="]).1.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard owner == String(uid) else { throw ToolError.invalid("wechat_owned_by_another_user") }
-        _ = kill(pid, SIGTERM)
+struct WeChatOwnedProcess: Equatable {
+    let pid: pid_t
+    let uid: uid_t
+}
+func weChatBundleProcesses(_ listing: String) -> [WeChatOwnedProcess] {
+    listing.split(separator: "\n").compactMap { line in
+        let parts = line.split(maxSplits: 2, whereSeparator: \.isWhitespace)
+        guard parts.count == 3, let pid = Int32(parts[0]), pid > 1,
+              let uid = UInt32(parts[1]),
+              parts[2].hasPrefix("/Applications/WeChat.app/Contents/") else { return nil }
+        return WeChatOwnedProcess(pid: pid, uid: uid)
     }
+}
+func stopOwnedWeChat(_ uid: uid_t) throws {
     let end = Date().addingTimeInterval(10)
+    var signalled = Set<pid_t>()
     while Date() < end {
-        if ((try? WeChatProcessLocator().processIDs()) ?? []).isEmpty { return }
+        let processes = weChatBundleProcesses(try system("/bin/ps", ["-axo", "pid=,uid=,comm="]).1)
+        if processes.isEmpty { return }
+        // Validate every owner before terminating anything. Include applets and
+        // crash handlers so signing never changes a still-running bundle helper.
+        guard processes.allSatisfy({ $0.uid == uid }) else { throw ToolError.invalid("wechat_owned_by_another_user") }
+        for process in processes where signalled.insert(process.pid).inserted { _ = kill(process.pid, SIGTERM) }
         Thread.sleep(forTimeInterval: 0.1)
     }
     throw ToolError.invalid("wechat_did_not_exit")

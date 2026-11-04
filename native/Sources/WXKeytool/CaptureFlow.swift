@@ -34,6 +34,7 @@ func capturePreflight() -> [String: Any] {
     let debuggerMajor = match.flatMap { Int(debuggerVersion[$0].dropFirst(5)) } ?? 0
     let os = ProcessInfo.processInfo.operatingSystemVersion
     let compatible = os.majorVersion < 27 || debuggerMajor >= 2000
+    let testedOS = os.majorVersion == 27 && os.minorVersion == 0
     #if arch(arm64)
     let testedArchitecture = true
     #else
@@ -44,7 +45,8 @@ func capturePreflight() -> [String: Any] {
         "hardened_runtime": details.contains("0x10000(runtime)"),
         "lldb": debugger, "lldb_version": debuggerVersion, "debugger_compatible": compatible,
         "tested_architecture": testedArchitecture, "requires_admin": true,
-        "ready": supported && testedArchitecture && compatible && details.contains("TeamIdentifier=5A4RE8SF68") && !debugger.isEmpty]
+        "tested_os": testedOS,
+        "ready": supported && testedOS && testedArchitecture && compatible && details.contains("TeamIdentifier=5A4RE8SF68") && !debugger.isEmpty]
 }
 
 final class CaptureJournal: @unchecked Sendable {
@@ -56,6 +58,7 @@ final class CaptureJournal: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         var value = extra
         value["phase"] = phase; value["message"] = message
+        value["helper_pid"] = getpid()
         value["updated_at"] = ISO8601DateFormatter().string(from: Date())
         if let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]) {
             let file = directory.appendingPathComponent("progress.json")
@@ -99,15 +102,23 @@ func openWeChat(_ uid: uid_t) throws {
 
 func runCaptureJob(_ path: String, recoverOnly: Bool = false) throws {
     guard geteuid() == 0 else { throw ToolError.invalid("capture_requires_system_authorization") }
+    let lockFD = open("/var/run/io.github.calwade.wx-keytool.lock", O_CREAT | O_RDWR | O_NOFOLLOW, 0o600)
+    guard lockFD >= 0 else { throw ToolError.invalid("capture_lock_failed") }
+    defer { close(lockFD) }
+    guard flock(lockFD, LOCK_EX | LOCK_NB) == 0 else { throw ToolError.invalid("another_capture_job_is_running") }
     let (directory, uid) = try validateJobDirectory(path)
     let journal = CaptureJournal(directory: directory, uid: uid)
     let app = "/Applications/WeChat.app"
     let backup = directory.appendingPathComponent("WeChat.original.app").path
     let pending = directory.appendingPathComponent("pending-key").path
     let cancel = directory.appendingPathComponent("cancel").path
+    let requestData = try Data(contentsOf: directory.appendingPathComponent("request.json"))
+    let request = try JSONSerialization.jsonObject(with: requestData) as? [String: Any]
+    let ownerPID = (request?["owner_pid"] as? Int32) ?? 0
     var modified = false
     var keyReady = FileManager.default.fileExists(atPath: pending)
     var failure = ""
+    do {
     if recoverOnly {
         guard FileManager.default.fileExists(atPath: backup) else { throw ToolError.invalid("recovery_backup_missing") }
         modified = true
@@ -120,6 +131,7 @@ func runCaptureJob(_ path: String, recoverOnly: Bool = false) throws {
         try requireSystem("/usr/bin/ditto", [app, backup])
         try requireSystem("/usr/bin/codesign", ["--verify", "--deep", "--strict", backup])
         do {
+            if FileManager.default.fileExists(atPath: cancel) { throw CaptureError.cancelled }
             try stopOwnedWeChat(uid)
             modified = true // Set before signing: an interrupted sign also requires restoration.
             journal.write("preparing", "正在准备本次取钥，完成后恢复官方客户端")
@@ -128,7 +140,9 @@ func runCaptureJob(_ path: String, recoverOnly: Bool = false) throws {
             let inventory = try DatabaseSaltInventory(root: directory.appendingPathComponent("samples"))
             guard !inventory.entries.isEmpty else { throw ToolError.invalid("database_samples_missing") }
             var capture = LLDBPassphraseCapture(lldbPath: lldbExecutable()!)
-            capture.isCancelled = { FileManager.default.fileExists(atPath: cancel) }
+            capture.isCancelled = {
+                FileManager.default.fileExists(atPath: cancel) || ownerPID <= 1 || kill(ownerPID, 0) != 0
+            }
             capture.outputHandler = { message in
                 if message.contains("capture ready") {
                     journal.write("ready_for_login", "监听已就绪。请在微信退出账号并重新登录同一个账号。", ["can_cancel": true])
@@ -158,6 +172,13 @@ func runCaptureJob(_ path: String, recoverOnly: Bool = false) throws {
           catch let ToolError.invalid(code) { failure = code }
           catch { failure = "capture_failed" }
     }
+    } catch let ToolError.invalid(code) {
+        journal.write(recoverOnly ? "recovery_required" : "failed", recoverOnly ? "恢复条件检查失败，请保留备份并查看诊断。" : "取钥准备未完成，未修改微信客户端。请检查环境后重试。", ["error": code, "official_restored": !recoverOnly])
+        return
+    } catch {
+        journal.write("failed", "客户端备份未完成，未修改微信。请检查可用空间和权限后重试。", ["error": "backup_failed", "official_restored": true])
+        return
+    }
     if modified {
         journal.write("restoring", "正在解除调试并恢复官方微信客户端")
         do {
@@ -165,9 +186,16 @@ func runCaptureJob(_ path: String, recoverOnly: Bool = false) throws {
             guard signature.contains("TeamIdentifier=5A4RE8SF68") else { throw ToolError.invalid("backup_signature_invalid") }
             try requireSystem("/usr/bin/codesign", ["--verify", "--deep", "--strict", backup])
             try stopOwnedWeChat(uid)
-            try FileManager.default.removeItem(atPath: app)
-            try requireSystem("/usr/bin/ditto", [backup, app])
-            try requireSystem("/usr/bin/codesign", ["--verify", "--deep", "--strict", app])
+            let staging = URL(fileURLWithPath: "/Applications/.WXWatcher-restore-\(directory.lastPathComponent).app")
+            let previous = URL(fileURLWithPath: "/Applications/.WXWatcher-previous-\(UUID().uuidString).app")
+            if FileManager.default.fileExists(atPath: staging.path) { try FileManager.default.removeItem(at: staging) }
+            try requireSystem("/usr/bin/ditto", [backup, staging.path])
+            try replaceApplication(application: URL(fileURLWithPath: app), staged: staging, previous: previous) { url in
+                try requireSystem("/usr/bin/codesign", ["--verify", "--deep", "--strict", url.path])
+                let details = try system("/usr/bin/codesign", ["-dv", "--verbose=2", url.path]).1
+                guard details.contains("TeamIdentifier=5A4RE8SF68"), details.contains("0x10000(runtime)")
+                else { throw ToolError.invalid("restore_signature_failed") }
+            }
             let restored = capturePreflight()
             guard restored["official_signature"] as? Bool == true,
                   restored["hardened_runtime"] as? Bool == true else { throw ToolError.invalid("restore_signature_failed") }

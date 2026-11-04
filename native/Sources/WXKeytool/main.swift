@@ -5,7 +5,7 @@ import CommonCrypto
 import Darwin
 import GreenBubblesAcquire
 
-enum ToolError: Error { case invalid(String) }
+enum ToolError: Error, Equatable { case invalid(String) }
 let service = "io.github.calwade.wx-watcher.account-key.v1"
 
 func output(_ value: [String: Any]) {
@@ -17,19 +17,19 @@ func text(_ d: [String: Any], _ name: String) throws -> String {
     return v
 }
 func keyData(_ hex: String) throws -> Data {
-    guard hex.count == 64, hex.allSatisfy({ $0.isHexDigit }) else { throw ToolError.invalid("invalid_key") }
+    guard hex.utf8.count == 64, hex.utf8.allSatisfy({ (48...57).contains($0) || (65...70).contains($0) || (97...102).contains($0) }) else { throw ToolError.invalid("invalid_key") }
     return Data(stride(from: 0, to: 64, by: 2).map { i in
         let a = hex.index(hex.startIndex, offsetBy: i)
         return UInt8(hex[a..<hex.index(a, offsetBy: 2)], radix: 16)!
     })
 }
-func keyQuery(_ id: String) throws -> [CFString: Any] {
+func keyQuery(_ id: String, serviceSecret: Bool = false) throws -> [CFString: Any] {
     guard UUID(uuidString: id) != nil else { throw ToolError.invalid("invalid_key_reference") }
-    return [kSecClass: kSecClassGenericPassword, kSecAttrService: service,
+    return [kSecClass: kSecClassGenericPassword, kSecAttrService: service + (serviceSecret ? ".app-secret" : ""),
             kSecAttrAccount: id]
 }
-func loadValue(_ id: String) throws -> Data {
-    var query = try keyQuery(id)
+func loadValue(_ id: String, serviceSecret: Bool = false) throws -> Data {
+    var query = try keyQuery(id, serviceSecret: serviceSecret)
     query[kSecReturnData] = true
     query[kSecMatchLimit] = kSecMatchLimitOne
     var result: CFTypeRef?
@@ -43,16 +43,28 @@ func loadKey(_ id: String) throws -> Data {
     guard data.count == 32 else { throw ToolError.invalid("invalid_key_length") }
     return data
 }
-func saveKey(_ data: Data, _ id: String) throws {
-    var query = try keyQuery(id)
+func saveKey(_ data: Data, _ id: String, serviceSecret: Bool = false) throws {
+    var query = try keyQuery(id, serviceSecret: serviceSecret)
     query[kSecValueData] = data
-    query[kSecAttrLabel] = "WX Watcher account database key"
+    query[kSecAttrLabel] = serviceSecret ? "WX Watcher Feishu app secret" : "WX Watcher account database key"
     let status = SecItemAdd(query as CFDictionary, nil)
     guard status == errSecSuccess else { throw ToolError.invalid("keychain_write_\(status)") }
 }
 func verify(_ data: Data, root: String) throws -> [String: Any] {
+    let directory = URL(fileURLWithPath: root)
+    guard let handle = opendir(directory.path) else {
+        throw ToolError.invalid(errno == EPERM || errno == EACCES ? "database_access_denied" : "database_root_unavailable")
+    }
+    closedir(handle)
+    let contact = directory.appendingPathComponent("contact/contact.db")
+    let fd = open(contact.path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+    guard fd >= 0 else {
+        throw ToolError.invalid(errno == EPERM || errno == EACCES ? "database_access_denied" : "database_contact_missing")
+    }
+    close(fd)
     let secret = try PassphraseSecret(bytes: Array(data))
-    let inventory = try DatabaseSaltInventory(root: URL(fileURLWithPath: root))
+    let inventory = try DatabaseSaltInventory(root: directory)
+    guard !inventory.entries.isEmpty else { throw ToolError.invalid("no_readable_database_pages") }
     var verified = 0
     for sample in inventory.saltVerificationSamples {
         let key = try SQLCipherKeyVerifier.deriveEncryptionKey(passphrase: secret, salt: sample.salt)
@@ -81,6 +93,24 @@ func random(_ size: Int) throws -> Data {
     return data
 }
 
+func encryptedBackup(_ data: Data, password: String) throws -> [String: Any] {
+    guard data.count == 32 else { throw ToolError.invalid("invalid_backup_key") }
+    let salt = try random(16)
+    let key = try derive(password, salt: salt)
+    let sealed = try AES.GCM.seal(data, using: key, authenticating: Data("wx-keytool-backup-v1".utf8))
+    return ["format": "wx-keytool-backup-v1", "kdf": "PBKDF2-SHA512", "rounds": 256000,
+            "salt": salt.base64EncodedString(), "sealed": sealed.combined!.base64EncodedString()]
+}
+func openBackup(_ backup: [String: Any], password: String) throws -> Data {
+    guard backup["format"] as? String == "wx-keytool-backup-v1", backup["kdf"] as? String == "PBKDF2-SHA512",
+          backup["rounds"] as? Int == 256000,
+          let salt = Data(base64Encoded: try text(backup, "salt")), salt.count == 16,
+          let sealed = Data(base64Encoded: try text(backup, "sealed")), sealed.count == 60
+    else { throw ToolError.invalid("invalid_backup") }
+    return try AES.GCM.open(AES.GCM.SealedBox(combined: sealed), using: derive(password, salt: salt),
+                            authenticating: Data("wx-keytool-backup-v1".utf8))
+}
+
 func request(_ input: [String: Any], internalRead: Bool) throws -> [String: Any] {
     let op = try text(input, "operation")
     switch op {
@@ -105,6 +135,7 @@ func request(_ input: [String: Any], internalRead: Bool) throws -> [String: Any]
     case "store":
         let data = try keyData(text(input, "key_hex"))
         let report = try verify(data, root: text(input, "db_root"))
+        guard report["all_verified"] as? Bool == true else { throw ToolError.invalid("partial_database_verification") }
         let id = UUID().uuidString.lowercased()
         try saveKey(data, id)
         do {
@@ -122,11 +153,11 @@ func request(_ input: [String: Any], internalRead: Bool) throws -> [String: Any]
         let secret = try text(input, "secret")
         guard secret.utf8.count <= 4096 else { throw ToolError.invalid("secret_too_large") }
         let id = UUID().uuidString.lowercased()
-        try saveKey(Data(secret.utf8), id)
+        try saveKey(Data(secret.utf8), id, serviceSecret: true)
         return ["ok": true, "key_ref": id]
     case "read_secret":
         guard internalRead else { throw ToolError.invalid("read_requires_internal_read_flag") }
-        guard let secret = String(data: try loadValue(text(input, "key_ref")), encoding: .utf8)
+        guard let secret = String(data: try loadValue(text(input, "key_ref"), serviceSecret: true), encoding: .utf8)
         else { throw ToolError.invalid("invalid_secret") }
         return ["ok": true, "secret": secret]
     case "delete":
@@ -135,21 +166,12 @@ func request(_ input: [String: Any], internalRead: Bool) throws -> [String: Any]
         return ["ok": true]
     case "export_backup":
         let data = try loadKey(text(input, "key_ref"))
-        let salt = try random(16)
-        let key = try derive(text(input, "password"), salt: salt)
-        let sealed = try AES.GCM.seal(data, using: key, authenticating: Data("wx-keytool-backup-v1".utf8))
-        return ["ok": true, "backup": ["format": "wx-keytool-backup-v1", "kdf": "PBKDF2-SHA512",
-            "rounds": 256000, "salt": salt.base64EncodedString(), "sealed": sealed.combined!.base64EncodedString()]]
+        return ["ok": true, "backup": try encryptedBackup(data, password: text(input, "password"))]
     case "import_backup":
-        guard let backup = input["backup"] as? [String: Any], backup["format"] as? String == "wx-keytool-backup-v1",
-              backup["rounds"] as? Int == 256000,
-              let salt = Data(base64Encoded: try text(backup, "salt")), salt.count == 16,
-              let sealed = Data(base64Encoded: try text(backup, "sealed")), sealed.count < 1024
-        else { throw ToolError.invalid("invalid_backup") }
-        let data = try AES.GCM.open(AES.GCM.SealedBox(combined: sealed),
-            using: derive(text(input, "password"), salt: salt), authenticating: Data("wx-keytool-backup-v1".utf8))
-        guard data.count == 32 else { throw ToolError.invalid("invalid_backup_key") }
+        guard let backup = input["backup"] as? [String: Any] else { throw ToolError.invalid("invalid_backup") }
+        let data = try openBackup(backup, password: text(input, "password"))
         let report = try verify(data, root: text(input, "db_root"))
+        guard report["all_verified"] as? Bool == true else { throw ToolError.invalid("partial_database_verification") }
         let id = UUID().uuidString.lowercased()
         try saveKey(data, id)
         return report.merging(["ok": true, "key_ref": id]) { a, _ in a }

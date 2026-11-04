@@ -1,17 +1,18 @@
 """只提供固定的 GET 资源；没有 SQL、发信、执行命令或读取任意文件的入口。"""
+
 from __future__ import annotations
 
 import hmac
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
-from pathlib import Path
 import secrets
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from .collector import Collector
 from .source import private_dir
-from .store import Store
+from .store import CursorExpired, Store
 
 
 def load_token(directory: Path) -> str:
@@ -32,7 +33,9 @@ def load_token(directory: Path) -> str:
     return token
 
 
-def create_server(store: Store, collector: Collector, token: str, port: int) -> ThreadingHTTPServer:
+def create_server(
+    store: Store, collector: Collector, token: str, port: int
+) -> ThreadingHTTPServer:
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, format, *args):
             pass  # 不记录认证头或客户消息正文。
@@ -48,11 +51,14 @@ def create_server(store: Store, collector: Collector, token: str, port: int) -> 
 
         def do_GET(self):
             expected = "Bearer " + token
-            if not hmac.compare_digest(self.headers.get("Authorization", "").encode(), expected.encode()):
+            if not hmac.compare_digest(
+                self.headers.get("Authorization", "").encode(), expected.encode()
+            ):
                 return self.reply(401, {"error": "需要 Bearer token"})
             route = urlsplit(self.path)
             params = parse_qs(route.query)
             try:
+
                 def integer(name, default, minimum=0, maximum=2000):
                     value = params.get(name, [str(default)])
                     if len(value) != 1:
@@ -61,20 +67,36 @@ def create_server(store: Store, collector: Collector, token: str, port: int) -> 
                     if not minimum <= number <= maximum:
                         raise ValueError(f"{name} 超出范围")
                     return number
+
                 if route.path == "/v1/status":
                     return self.reply(200, collector.status())
                 if route.path == "/v1/messages":
                     if collector.status()["state"] != "ready":
-                        return self.reply(503, {"error": "数据源尚未就绪，请查看 /v1/status"})
-                    data = {"group_name": collector.status().get("group_name", collector.config.group_name),
-                            "messages": store.history(integer("limit", 50, 1, 200))}
+                        return self.reply(
+                            503, {"error": "数据源尚未就绪，请查看 /v1/status"}
+                        )
+                    data = {
+                        "group_name": collector.status().get(
+                            "group_name", collector.config.group_name
+                        ),
+                        "messages": store.history(integer("limit", 50, 1, 200)),
+                    }
                     return self.reply(200, data)
                 if route.path == "/v1/events":
                     if collector.status()["state"] != "ready":
-                        return self.reply(503, {"error": "数据源尚未就绪，请查看 /v1/status"})
-                    return self.reply(200, store.events(
-                        integer("after", 0, 0, 2**63-1), integer("limit", 200, 1, 1000)))
+                        return self.reply(
+                            503, {"error": "数据源尚未就绪，请查看 /v1/status"}
+                        )
+                    return self.reply(
+                        200,
+                        store.events(
+                            integer("after", 0, 0, 2**63 - 1),
+                            integer("limit", 200, 1, 1000),
+                        ),
+                    )
                 return self.reply(404, {"error": "资源不存在"})
+            except CursorExpired as exc:
+                return self.reply(410, {"error": "cursor_expired", "message": str(exc)})
             except ValueError as exc:
                 return self.reply(400, {"error": str(exc)})
 

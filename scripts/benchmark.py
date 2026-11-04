@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """真实 SQLCipher 加密、合成消息与 32 MiB WAL 的端到端本机计时。"""
+
 import json
-from pathlib import Path
 import sys
 import tempfile
 import time
+from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(root), str(root / "tests")]
 from test_pipeline import Fixture
+
 from wx_watcher.collector import Collector
 from wx_watcher.store import Store
 
@@ -18,8 +20,10 @@ with tempfile.TemporaryDirectory() as temp:
     collector = Collector(fixture.config, store)
     try:
         collector.poll()
-        fixture.shard.exec("CREATE TABLE filler(data BLOB);"
-                           "INSERT INTO filler VALUES(randomblob(33554432));")
+        fixture.shard.exec(
+            "CREATE TABLE filler(data BLOB);"
+            "INSERT INTO filler VALUES(randomblob(33554432));"
+        )
         started = time.monotonic()
         fixture.insert(fixture.shard, 2, "合成消息：WAL 延迟测试")
         collector.poll()

@@ -1,22 +1,34 @@
-from dataclasses import replace
 import json
-from pathlib import Path
 import subprocess
 import tempfile
 import threading
+import time
 import unittest
+from dataclasses import replace
+from pathlib import Path
 from unittest.mock import patch
 
-from test_pipeline import Fixture, TABLE
+from test_pipeline import TABLE, Fixture
+
 from wx_watcher.api import create_server, load_token
 from wx_watcher.collector import Collector
-from wx_watcher.reply import (ReplyAgent, ReplyConfig, ReplyStore, feishu_text,
-                              make_prompt, parse_proposal)
+from wx_watcher.reply import (
+    ReplyAgent,
+    ReplyConfig,
+    ReplyStore,
+    feishu_text,
+    make_prompt,
+    parse_proposal,
+)
 from wx_watcher.store import Store
 
-
-PROPOSAL = {"should_reply": True, "summary": "发送时间", "suggested_reply": "我先确认具体安排，再给您准确回复。",
-            "reason": "缺少发送日期，需要内部确认", "needs_confirmation": ["具体发送时间"]}
+PROPOSAL = {
+    "should_reply": True,
+    "summary": "发送时间",
+    "suggested_reply": "我先确认具体安排，再给您准确回复。",
+    "reason": "缺少发送日期，需要内部确认",
+    "needs_confirmation": ["具体发送时间"],
+}
 
 
 class FakeDSH:
@@ -27,10 +39,13 @@ class FakeDSH:
     def request(self, route, data=None):
         if data:
             self.post_count += 1
-            self.jobs[data["id"]] = {"id": data["id"], "status": "completed",
-                                     "output": json.dumps(PROPOSAL, ensure_ascii=False),
-                                     "session_id": "wx-reply-" + data["id"],
-                                     "usage": {"input": 20, "output": 30}}
+            self.jobs[data["id"]] = {
+                "id": data["id"],
+                "status": "completed",
+                "output": json.dumps(PROPOSAL, ensure_ascii=False),
+                "session_id": "wx-reply-" + data["id"],
+                "usage": {"input": 20, "output": 30},
+            }
             return {"id": data["id"], "status": "queued"}
         return self.jobs[route.rsplit("/", 1)[1]]
 
@@ -38,16 +53,32 @@ class FakeDSH:
 class ReplyValidationTests(unittest.TestCase):
     def test_output_schema_rejects_instructions_and_invalid_values(self):
         self.assertEqual(parse_proposal(json.dumps(PROPOSAL)), PROPOSAL)
-        for value in [{**PROPOSAL, "command": "rm -rf /"}, {**PROPOSAL, "should_reply": "true"},
-                      {**PROPOSAL, "suggested_reply": ""}, {**PROPOSAL, "should_reply": False},
-                      {**PROPOSAL, "needs_confirmation": [None]}]:
+        for value in [
+            {**PROPOSAL, "command": "rm -rf /"},
+            {**PROPOSAL, "should_reply": "true"},
+            {**PROPOSAL, "suggested_reply": ""},
+            {**PROPOSAL, "should_reply": False},
+            {**PROPOSAL, "needs_confirmation": [None]},
+        ]:
             with self.subTest(value=value), self.assertRaises(ValueError):
                 parse_proposal(json.dumps(value))
 
     def test_prompt_excludes_later_messages_and_bounds_context(self):
-        history = [{"message_id": str(i), "local_id": i, "created_at": 100, "content": "早期上下文" * 600}
-                   for i in range(50)]
-        event = {"message_id": "trigger", "local_id": 49, "created_at": 100, "content": "什么时候发资料？"}
+        history = [
+            {
+                "message_id": str(i),
+                "local_id": i,
+                "created_at": 100,
+                "content": "早期上下文" * 600,
+            }
+            for i in range(50)
+        ]
+        event = {
+            "message_id": "trigger",
+            "local_id": 49,
+            "created_at": 100,
+            "content": "什么时候发资料？",
+        }
         history += [{"created_at": 101, "content": "这个是未来消息，不应出现在请求中"}]
         prompt = make_prompt("样例群", event, history, "价格未确定" * 2000)
         self.assertLess(len(prompt), 28000)
@@ -56,10 +87,15 @@ class ReplyValidationTests(unittest.TestCase):
         self.assertNotIn("master-key", prompt)
 
     def test_feishu_text_cannot_create_mentions_or_fetch_remote_images(self):
-        value = {**PROPOSAL, "suggested_reply": '<at user_id="all">所有人</at> ![x](https://example.com/x.png)'}
+        value = {
+            **PROPOSAL,
+            "suggested_reply": '<at user_id="all">所有人</at> ![x](https://example.com/x.png)',
+        }
         text = feishu_text("群", value, {"content": "消息"})
         self.assertNotIn("<at", text)
-        self.assertIn("https://example.com/x.png", text)  # Delivered as text, never Markdown-fetched.
+        self.assertIn(
+            "https://example.com/x.png", text
+        )  # Delivered as text, never Markdown-fetched.
 
     def test_store_cursor_and_tasks_survive_restart_without_duplicates(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -81,6 +117,7 @@ class ReplyValidationTests(unittest.TestCase):
 
 class ReplyPipelineTests(unittest.TestCase):
     """Real SQLCipher/WAL → authenticated reader → durable agent → mocked model boundary."""
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
@@ -94,15 +131,22 @@ class ReplyPipelineTests(unittest.TestCase):
         self.thread.start()
         reader_config = self.root / "config/local.toml"
         reader_config.parent.mkdir()
-        reader_config.write_text(f'db_root = {json.dumps(str(self.fixture.root))}\n'
-                                 f'state_dir = {json.dumps(str(self.fixture.config.state_dir))}\n'
-                                 f'key_file = {json.dumps(str(self.fixture.config.key_file))}\n'
-                                 f'port = {self.server.server_port}\n')
+        reader_config.write_text(
+            f"db_root = {json.dumps(str(self.fixture.root))}\n"
+            f"state_dir = {json.dumps(str(self.fixture.config.state_dir))}\n"
+            f"key_file = {json.dumps(str(self.fixture.config.key_file))}\n"
+            f"port = {self.server.server_port}\n"
+        )
         dsh_token = self.root / "dsh-token"
         dsh_token.write_text("x" * 64)
         dsh_token.chmod(0o600)
-        self.config = ReplyConfig(reader_config=reader_config, state_dir=self.root / "agent",
-                                  dsh_token_file=dsh_token, feishu_chat_id="oc_test", feishu_chat_name="测试内部群")
+        self.config = ReplyConfig(
+            reader_config=reader_config,
+            state_dir=self.root / "agent",
+            dsh_token_file=dsh_token,
+            feishu_chat_id="oc_test",
+            feishu_chat_name="测试内部群",
+        )
         self.agent = ReplyAgent(self.config)
         self.fake = FakeDSH()
         self.agent.dsh = self.fake
@@ -150,7 +194,9 @@ class ReplyPipelineTests(unittest.TestCase):
     def test_numeric_and_system_events_do_not_call_model(self):
         self.add(2, "609517")
         self.fixture.insert(self.fixture.shard, 3, "系统通知")
-        self.fixture.shard.exec(f'UPDATE "{TABLE}" SET local_type=10000 WHERE local_id=3;')
+        self.fixture.shard.exec(
+            f'UPDATE "{TABLE}" SET local_type=10000 WHERE local_id=3;'
+        )
         self.collector.poll()
         self.agent.tick()
         tasks = self.agent.store.tasks()
@@ -184,14 +230,18 @@ class ReplyPipelineTests(unittest.TestCase):
         with self.assertRaises(PermissionError):
             self.agent.send(task)
         self.agent.config = replace(self.config, send_enabled=True)
-        success = subprocess.CompletedProcess([], 0, stdout='{"ok":true,"data":{"message_id":"m1"}}', stderr="")
+        success = subprocess.CompletedProcess(
+            [], 0, stdout='{"ok":true,"data":{"message_id":"m1"}}', stderr=""
+        )
         with patch("wx_watcher.reply.subprocess.run", return_value=success) as run:
             self.agent.send(task)
             args = run.call_args.args[0]
             self.assertEqual(args[args.index("--as") + 1], "bot")
             self.assertEqual(args[args.index("--chat-id") + 1], "oc_test")
             self.assertNotIn("--markdown", args)
-            self.assertTrue(args[args.index("--idempotency-key") + 1].startswith("wxr-"))
+            self.assertTrue(
+                args[args.index("--idempotency-key") + 1].startswith("wxr-")
+            )
             self.agent.tick()
             self.assertEqual(run.call_count, 1)
         self.assertEqual(self.agent.store.task(task["id"])["status"], "sent")
@@ -202,7 +252,10 @@ class ReplyPipelineTests(unittest.TestCase):
         self.agent.tick()
         task = self.agent.store.tasks()[0]
         self.agent.config = replace(self.config, send_enabled=True)
-        with patch("wx_watcher.reply.subprocess.run", side_effect=subprocess.TimeoutExpired("lark-cli", 30)) as run:
+        with patch(
+            "wx_watcher.reply.subprocess.run",
+            side_effect=subprocess.TimeoutExpired("lark-cli", 30),
+        ) as run:
             with self.assertRaises(RuntimeError):
                 self.agent.send(task)
             self.agent.tick()
@@ -217,6 +270,35 @@ class ReplyPipelineTests(unittest.TestCase):
         self.agent.store.save(task)
         self.agent.initialize()
         self.assertEqual(self.agent.store.task(task["id"])["status"], "delivery_review")
+
+    def test_batch_survives_restart_and_combines_consecutive_messages(self):
+        self.agent.config = replace(self.config, debounce_seconds=2)
+        self.add(2, "请问培训时间？")
+        self.add(3, "还有上课地点？")
+        self.agent.tick()
+        self.assertEqual(self.fake.post_count, 0)
+        self.agent.store.db.close()
+        self.agent = ReplyAgent(replace(self.config, debounce_seconds=2))
+        self.agent.dsh = self.fake
+        self.agent.initialize()
+        with self.agent.store.db:
+            self.agent.store.db.execute(
+                "UPDATE pending_events SET received=?", (time.time() - 3,)
+            )
+        self.agent.tick()
+        self.assertEqual(self.fake.post_count, 1)
+        task = self.agent.store.tasks()[0]
+        self.assertEqual(len(task["event_ids"]), 2)
+        self.assertIn("培训时间", task["event"]["content"])
+        self.assertIn("上课地点", task["event"]["content"])
+
+    def test_daily_call_limit_holds_extra_task(self):
+        self.agent.config = replace(self.config, max_daily_calls=1)
+        self.add(2, "第一个问题是什么时候？")
+        self.add(3, "第二个问题在哪里？")
+        self.agent.tick()
+        self.assertEqual(self.fake.post_count, 1)
+        self.assertIn("budget_review", [t["status"] for t in self.agent.store.tasks()])
 
 
 if __name__ == "__main__":

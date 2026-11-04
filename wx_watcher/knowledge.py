@@ -1,14 +1,18 @@
 """Small, local, deterministic knowledge selection; no external index service."""
+
 from __future__ import annotations
+
 import hashlib
-from pathlib import Path
 import re
+from pathlib import Path
 
 
-def select_passages(files: tuple[Path, ...], query: str, budget=6000) -> tuple[str, list[dict]]:
+def select_passages(
+    files: tuple[Path, ...], query: str, budget=6000
+) -> tuple[str, list[dict]]:
     terms = set(re.findall(r"[a-zA-Z0-9]{2,}", query.lower()))
     chinese = "".join(re.findall(r"[\u4e00-\u9fff]+", query))
-    terms.update(chinese[i:i+2] for i in range(max(0, len(chinese)-1)))
+    terms.update(chinese[i : i + 2] for i in range(max(0, len(chinese) - 1)))
     passages, sources = [], []
     total = 0
     for path in files[:20]:
@@ -22,14 +26,14 @@ def select_passages(files: tuple[Path, ...], query: str, budget=6000) -> tuple[s
         sources.append({"name": path.name, "sha256": hashlib.sha256(raw).hexdigest()})
         for i, block in enumerate(re.split(r"\n\s*\n", text)):
             for offset in range(0, len(block), 1000):
-                chunk = block[offset:offset+1000].strip()
+                chunk = block[offset : offset + 1000].strip()
                 if chunk:
                     score = sum(chunk.lower().count(t) for t in terms)
                     passages.append((score, path.name, i, offset, chunk))
     passages.sort(key=lambda p: (-p[0], p[1], p[2], p[3]))
     chosen, used = [], 0
     for _, name, index, _, chunk in passages:
-        value = f"[资料：{name}，段落 {index+1}]\n{chunk}"
+        value = f"[资料：{name}，段落 {index + 1}]\n{chunk}"
         if used + len(value) > budget:
             continue
         chosen.append(value)

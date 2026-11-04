@@ -21,3 +21,7 @@ native/.swiftpm/
 .env
 .env.*
 !*.example
+node_modules/
+playwright-report/
+test-results/
+.ruff_cache/

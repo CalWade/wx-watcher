@@ -20,6 +20,7 @@ git clone https://github.com/CalWade/wx-watcher.git
 cd wx-watcher
 uv sync --frozen
 swift build --package-path native -c release
+codesign --force --sign - native/.build/release/wx-keytool
 uv run wx-watcher desktop
 ```
 

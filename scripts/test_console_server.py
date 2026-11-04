@@ -33,6 +33,7 @@ class FixtureController(Controller):
     def __init__(self, directory):
         super().__init__(directory)
         self.services = FakeServices()
+        self.capture_phase = "idle"
         self.state.update(
             profiles=[
                 {
@@ -98,6 +99,22 @@ class FixtureController(Controller):
             ]
         if operation == "capture-sessions":
             return []
+        if operation == "capture-start":
+            self.capture_phase = "awaiting_login_page"
+            return {"capture_id": "synthetic-capture", "phase": self.capture_phase}
+        if operation == "capture-login-ready":
+            self.capture_phase = "ready_for_login"
+            return {"message": "已确认合成登录页"}
+        if operation == "capture-cancel":
+            self.capture_phase = "cancelled"
+            return {"cancel_requested": True}
+        if operation == "capture-status":
+            return {
+                "phase": self.capture_phase,
+                "message": "请先停在登录页确认"
+                if self.capture_phase == "awaiting_login_page"
+                else "监听已就绪，可以登录",
+            }
         if operation == "install-dsh":
             return {"installed": True, "ready": True}
         if operation == "test-dsh":

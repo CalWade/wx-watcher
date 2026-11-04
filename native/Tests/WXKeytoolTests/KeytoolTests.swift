@@ -1,8 +1,60 @@
 import Testing
 import Foundation
+import Darwin
+import GreenBubblesAcquire
 @testable import WXKeytool
 
 @Suite struct KeytoolTests {
+    @Test func clientShutdownIncludesBundleHelpersAndExcludesOtherApps() {
+        let listing = """
+        12 501 /Applications/WeChat.app/Contents/MacOS/WeChat
+        13 501 /Applications/WeChat.app/Contents/MacOS/WeChatAppEx.app/Contents/MacOS/WeChatAppEx
+        14 501 /Applications/WeChat.app/Contents/MacOS/Helpers/WeChat Helper (GPU)
+        15 501 /Applications/WeChat.app/Contents/Frameworks/crashpad_handler
+        16 501 /Applications/WeChat.app.old/Contents/MacOS/WeChat
+        17 501 /Applications/Other.app/Contents/MacOS/Other
+        """
+        #expect(weChatBundleProcesses(listing).map(\.pid) == [12, 13, 14, 15])
+        #expect(weChatBundleProcesses("18 502 /Applications/WeChat.app/Contents/MacOS/WeChat").first?.uid == 502)
+    }
+    @Test func loginPageGateHonorsConfirmationCancellationAndDeadline() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        #expect(throws: ToolError.invalid("login_page_confirmation_timed_out")) {
+            try waitForLoginPage(directory, ownerPID: getpid(), deadline: Date().addingTimeInterval(-1))
+        }
+        try Data().write(to: directory.appendingPathComponent("login-page-ready"))
+        try waitForLoginPage(directory, ownerPID: getpid(), deadline: Date().addingTimeInterval(1))
+        try Data().write(to: directory.appendingPathComponent("cancel"))
+        #expect(throws: CaptureError.cancelled) {
+            try waitForLoginPage(directory, ownerPID: getpid(), deadline: Date().addingTimeInterval(1))
+        }
+    }
+    @Test func accountTrackingIgnoresPreviousAccountCaches() {
+        let listing = """
+        n/example/old/db_storage/MMKV/storage_common
+        n/example/old/db_storage/message/message_0.kvdb-shm
+        n/example/current/db_storage/contact/contact.db
+        n/example/current/db_storage/message/message_0.db-wal
+        """
+        #expect(databaseRootsFromOpenFiles(listing) == ["/example/current/db_storage"])
+    }
+    @Test func permissionProbePreservesBytesAndReportsDeniedAccess() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("permission-probe")
+        let bytes = Data("unchanged permission fixture".utf8)
+        try bytes.write(to: file)
+        #expect(probeFileAccess(file.path, write: true).allowed)
+        #expect(try Data(contentsOf: file) == bytes)
+        try FileManager.default.setAttributes([.posixPermissions: 0o400], ofItemAtPath: file.path)
+        let access = probeFileAccess(file.path, write: true)
+        #expect(!access.allowed)
+        #expect(access.error == EACCES)
+        #expect(try Data(contentsOf: file) == bytes)
+    }
     @Test func keyValidation() throws {
         #expect(try keyData(String(repeating: "ab", count: 32)).count == 32)
         #expect(throws: ToolError.self) { try keyData("bad") }

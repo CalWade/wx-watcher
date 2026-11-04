@@ -126,7 +126,8 @@ func request(_ input: [String: Any], internalRead: Bool) throws -> [String: Any]
                 "lldb": candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) ?? "",
                 "keychain_service": service, "keychain_default_status": defaultStatus,
                 "keychain_probe_status": probeStatus, "keychain_flags": keychainStatus]
-    case "capture_preflight": return capturePreflight()
+    case "capture_preflight":
+        return capturePreflight(dbRoot: try text(input, "db_root"), checkApplicationAccess: true)
     case "verify":
         let data: Data
         if input["key_ref"] != nil { data = try loadKey(text(input, "key_ref")) }

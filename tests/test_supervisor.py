@@ -43,6 +43,28 @@ class SupervisorTests(unittest.TestCase):
         stop.assert_called_once()
         self.assertEqual(self.services.last_error, "读取服务启动失败")
 
+    def test_worker_waits_for_reader_without_consuming_restart_budget(self):
+        reader, worker = Mock(), Mock()
+        reader.poll.return_value = None
+        worker.poll.return_value = 1
+        self.services.children.update(reader=reader, worker=worker)
+        self.services.expected_running = True
+        with (
+            patch.object(self.services, "_reader_ready", return_value=False),
+            patch.object(self.services, "_spawn") as spawn,
+        ):
+            for _ in range(5):
+                self.services._watch_once()
+        spawn.assert_not_called()
+        self.assertEqual(self.services.restarts["worker"], [])
+        with (
+            patch.object(self.services, "_reader_ready", return_value=True),
+            patch.object(self.services, "_spawn") as spawn,
+        ):
+            self.services._watch_once()
+        self.assertEqual(spawn.call_count, 1)
+        self.assertEqual(len(self.services.restarts["worker"]), 1)
+
     def test_log_rotation_keeps_bounded_private_tail(self):
         file = self.services.state.home / "reader.log"
         file.write_bytes(b"x" * 2_100_000)

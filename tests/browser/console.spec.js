@@ -47,6 +47,25 @@ test("credential page never displays secret material", async ({ page }) => {
     "password",
   );
 });
+test("capture requires a separate login-page confirmation before login readiness", async ({
+  page,
+}) => {
+  await page.locator('nav [data-page="keytool"]').click();
+  const confirm = page.locator("#capture-login-ready");
+  await expect(confirm).toBeHidden();
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.locator("#capture-start").click();
+  await expect(confirm).toBeVisible();
+  await expect(page.locator("#capture-progress")).toContainText("先停在登录页");
+  await expect(page.locator("#notice")).not.toContainText(
+    "现在可以点击微信登录",
+  );
+  await confirm.click();
+  await expect(confirm).toBeHidden();
+  await expect(page.locator("#notice")).toContainText("现在可以点击微信登录");
+  await page.locator("#capture-cancel").click();
+  await closeJob(page);
+});
 test("automatic connection exposes choices and completes setup in one flow", async ({
   page,
 }) => {

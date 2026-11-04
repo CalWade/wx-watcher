@@ -225,7 +225,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
               let request = message.body as? [String: Any],
               let kind = request["kind"] as? String, let id = request["id"] as? String,
               id.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" }) else { return }
-        if kind == "open-privacy" {
+        if kind == "open-app-management" {
+            showPermissionHelp()
+            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AppBundles")!)
+        } else if kind == "open-privacy" {
             showPermissionHelp()
             DispatchQueue.global(qos: .utility).async {
                 _ = probeWeChatDirectory()

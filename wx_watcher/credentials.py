@@ -33,7 +33,12 @@ def native_request(data: dict, executable: str = "", *, internal_read=False) -> 
     if internal_read:
         args.append("--internal-read")
     result = subprocess.run(
-        args, input=json.dumps(data), text=True, capture_output=True, timeout=120
+        args,
+        input=json.dumps(data),
+        text=True,
+        capture_output=True,
+        timeout=120,
+        cwd="/private/tmp",
     )
     try:
         answer = json.loads(result.stdout)

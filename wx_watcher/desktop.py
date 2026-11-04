@@ -162,6 +162,7 @@ def create_desktop(controller: Controller, token: str, port=0):
                 "capture-start",
                 "capture-status",
                 "capture-cancel",
+                "capture-login-ready",
                 "capture-sessions",
                 "capture-recover",
                 "diagnostics",

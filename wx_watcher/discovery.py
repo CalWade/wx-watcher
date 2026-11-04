@@ -1,6 +1,7 @@
 """Determine which local account the official WeChat process actually has open."""
 
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -34,6 +35,10 @@ def active_roots() -> list[Path]:
                     line.startswith("n")
                     and "/xwechat_files/" in line
                     and "/db_storage/" in line
+                    and re.search(
+                        r"/db_storage/(?:contact/contact|session/session|message/message_\d+)\.db(?:-wal)?$",
+                        line,
+                    )
                 ):
                     root = Path(line[1:].split("/db_storage/", 1)[0]) / "db_storage"
                     if root.is_dir():

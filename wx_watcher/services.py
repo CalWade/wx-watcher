@@ -183,6 +183,18 @@ class Services:
             except (OSError, ValueError, RuntimeError):
                 self.last_error = "后台维护遇到错误，请查看数据目录权限和剩余空间"
 
+    def _reader_ready(self):
+        try:
+            config = Config.load(self.state.home / "config/reader.toml")
+            return (
+                LocalAPI(config.port, config.state_dir / "api-token.txt")
+                .request("/v1/status")
+                .get("state")
+                == "ready"
+            )
+        except (OSError, RuntimeError, ValueError):
+            return False
+
     def _watch_once(self):
         with self.lock:
             for name in ("reader", "worker"):
@@ -198,6 +210,10 @@ class Services:
                         f.truncate(0)
                 p = self.children.get(name)
                 if self.expected_running and p and p.poll() is not None:
+                    if name == "worker" and not self._reader_ready():
+                        # Reader initialization can take several scans. Do not spend the
+                        # worker's restart budget on an expected dependency outage.
+                        continue
                     self.restarts[name] = [
                         t for t in self.restarts[name] if time.time() - t < 600
                     ]

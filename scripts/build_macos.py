@@ -138,6 +138,8 @@ def main():
             "NSHighResolutionCapable": True,
             "WXKeytoolMode": keytool,
             "NSAppleEventsUsageDescription": "在你确认后使用系统授权窗口启动一次性的微信取钥与恢复任务。",
+            "NSAppBundlesUsageDescription": "仅在首次取钥时，按你的确认临时准备微信调试签名，结束后恢复已验证的官方客户端。",
+            "NSAppDataUsageDescription": "只读访问你选择的微信本地消息数据库，验证凭据并生成回复建议。",
             "NSSystemAdministrationUsageDescription": "读取你选择的微信本地数据库，用于生成内部回复建议。系统授权仍由你本人确认。",
         }
         with (contents / "Info.plist").open("wb") as f:

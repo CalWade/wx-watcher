@@ -297,6 +297,7 @@ class KeyFlow:
                     verified=saved["verified"],
                     total=saved["total"],
                     account_label=bound_root.parent.name,
+                    db_root=str(bound_root),
                 )
                 atomic_json(directory / "progress.json", progress)
             return progress

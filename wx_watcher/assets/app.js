@@ -281,7 +281,7 @@ function accountPanelHTML(framed = true) {
   const r = accountReport;
   const rows = r?.accounts || [];
   const hasSaved = settings.profiles?.length > 0;
-  return `<section id="account-panel" ${framed ? 'class="card"' : ""}><h2>微信账号</h2><div class="account-summary"><div><span class="label">微信当前登录</span><strong id="wechat-current-account">${escape(r?.current?.label || "尚未识别，请登录微信后刷新")}</strong></div><div><span class="label">NoteBridge 已连接</span><strong id="project-selected-account">${escape(r?.selected?.label || "尚未连接")}</strong></div></div><p id="account-message" class="${r?.matches_current ? "success" : "note"}">${escape(r?.message || "正在识别账号…")}</p><div class="actions">${r?.code === "unavailable" ? '<button id="account-privacy" class="primary">允许读取微信资料</button>' : ""}${(!hasSaved || !r?.current) && page === "setup" ? `<button id="first-connect" class="${r?.code === "unavailable" ? "" : "primary"}">${hasSaved ? "检查微信连接" : "首次连接微信"}</button>` : ""}${r?.current && (hasSaved || page !== "setup") ? `<button id="use-current-account" class="${r.matches_current || page === "keytool" ? "" : "primary"}">${r.current.credential_saved ? (r.matches_current ? "验证当前账号" : "验证并切换到当前账号") : "连接当前账号"}</button>` : ""}<button id="refresh-accounts" class="text-button">刷新账号</button></div><details id="account-list"><summary id="account-toggle">已发现的账号 · ${rows.length}</summary>${rows.map((a, i) => `<div class="row"><div class="grow"><strong>${escape(a.label)}</strong><p class="muted">${a.active ? "微信当前登录 · " : "历史账号资料 · "}${a.credential_saved ? "密钥已保存" : "尚无密钥"}${a.selected ? " · 本项目正在使用" : ""}</p></div><button data-account-index="${i}" ${a.active ? "" : "disabled"}>${a.credential_saved ? "验证并使用" : "连接此账号"}</button></div>`).join("")}<p class="muted">首次连接可在取钥向导选择历史账号，或登录其他账号。每个账号分别保存凭据。</p></details></section>`;
+  return `<section id="account-panel" ${framed ? 'class="card"' : ""}><h2>微信账号</h2><div class="account-summary"><div><span class="label">微信当前登录</span><strong id="wechat-current-account">${escape(r?.current?.label || "尚未识别，请登录微信后刷新")}</strong></div><div><span class="label">NoteBridge 已连接</span><strong id="project-selected-account">${escape(r?.selected?.label || "尚未连接")}</strong></div></div><p id="account-message" class="${r?.matches_current ? "success" : "note"}">${escape(r?.message || "正在识别账号…")}</p><div class="actions">${r?.code === "unavailable" ? '<button id="account-privacy" class="primary">允许读取微信资料</button>' : ""}${(!hasSaved || !r?.current) && page === "setup" ? `<button id="first-connect" class="${r?.code === "unavailable" ? "" : "primary"}">${hasSaved ? "检查微信连接" : "首次连接微信"}</button>` : ""}${r?.current && (hasSaved || page !== "setup") ? `<button id="use-current-account" class="${r.matches_current || page === "keytool" ? "" : "primary"}">${r.current.credential_saved ? (r.matches_current ? "验证当前账号" : "验证并切换到当前账号") : "连接当前账号"}</button>` : ""}<button id="refresh-accounts" class="text-button">刷新账号</button></div><details id="account-list"><summary id="account-toggle">已发现的账号 · ${rows.length}</summary>${rows.map((a, i) => `<div class="row"><div class="grow"><strong>${escape(a.label)}</strong><p class="muted">${a.active ? "微信当前登录 · " : "历史账号资料 · "}${a.credential_saved ? "密钥已保存" : "尚无密钥"}${a.selected ? " · 本项目正在使用" : ""}</p></div><div class="actions"><button data-name-index="${i}" class="text-button">显示名称</button><button data-account-index="${i}" ${a.active ? "" : "disabled"}>${a.credential_saved ? "验证并使用" : "连接此账号"}</button></div></div>`).join("")}<p class="muted">首次连接可在取钥向导选择历史账号，或登录其他账号。每个账号分别保存凭据。</p></details></section>`;
 }
 function updateAccountActions() {
   const matches = accountReport?.matches_current === true;
@@ -337,12 +337,77 @@ function bindAccountPanel() {
     notice(accountReport?.message || "账号状态已刷新");
   });
   bind("use-current-account", () => useAccount(accountReport.current));
+  document.querySelectorAll("[data-name-index]").forEach((b) => {
+    b.onclick = () =>
+      editAccountName(accountReport.accounts[Number(b.dataset.nameIndex)]);
+  });
   document.querySelectorAll("[data-account-index]").forEach((b) => {
     b.onclick = () =>
       useAccount(accountReport.accounts[Number(b.dataset.accountIndex)]).catch(
         (e) => notice(e.message, true),
       );
   });
+}
+async function editAccountName(account) {
+  if (!account?.db_root) return;
+  const dialog = $("#account-name-dialog"),
+    input = $("#account-name-input"),
+    error = $("#account-name-error");
+  input.value = account.custom_label || "";
+  error.textContent = "";
+  const identity = () => {
+    $("#account-name-identity").textContent =
+      account.nickname || account.wechat_id
+        ? [
+            account.nickname && "微信昵称：" + account.nickname,
+            account.wechat_id && "微信号：" + account.wechat_id,
+          ]
+            .filter(Boolean)
+            .join(" · ")
+        : "暂未读取微信资料。可以先填写本地备注，连接并验证后再读取昵称。";
+    $("#account-name-id").textContent =
+      account.account_id || account.db_root.split("/").slice(-2, -1)[0];
+  };
+  identity();
+  $("#account-name-refresh").disabled = !account.credential_saved;
+  $("#account-name-cancel").onclick = () => dialog.close();
+  const save = $("#account-name-save"),
+    reload = $("#account-name-refresh");
+  const update = async (op) => {
+    save.disabled = reload.disabled = true;
+    error.textContent = "";
+    try {
+      const result = await quietAction(op, {
+        db_root: account.db_root,
+        label: input.value,
+      });
+      account = { ...account, ...result };
+      await refresh();
+      if (pendingAccount?.db_root === account.db_root)
+        pendingAccount = { ...pendingAccount, ...result };
+      if (captureReadiness) {
+        captureReadiness.accounts = captureReadiness.accounts?.map((a) =>
+          a.db_root === account.db_root ? { ...a, ...result } : a,
+        );
+        if (captureReadiness.db_root === account.db_root)
+          captureReadiness.account_label = result.label;
+      }
+      if (op === "account-name") {
+        dialog.close();
+        render();
+        notice("账号显示名称已保存");
+      } else identity();
+    } catch (e) {
+      error.textContent = e.message;
+    } finally {
+      save.disabled = false;
+      reload.disabled = !account.credential_saved;
+    }
+  };
+  save.onclick = () => update("account-name");
+  reload.onclick = () => update("refresh-account-name");
+  dialog.showModal();
+  input.focus();
 }
 async function useAccount(account) {
   if (!account?.active)
@@ -822,9 +887,15 @@ function captureTimeline(phase) {
     .join("");
 }
 function keytool() {
-  const profile = settings.profiles.find(
+  const savedProfile = settings.profiles.find(
     (p) => p.id === settings.active_profile,
   );
+  const profile = savedProfile && {
+    ...savedProfile,
+    label:
+      accountReport?.accounts.find((a) => a.db_root === savedProfile.db_root)
+        ?.label || savedProfile.label,
+  };
   const report = captureReadiness;
   const target =
     pendingAccount ||
@@ -849,7 +920,7 @@ function keytool() {
     )
     .join("");
   $("#content").innerHTML =
-    `<div class="account-strip"><button id="back-to-setup" class="text-button">← 返回接入设置</button><span id="selected-account">本次取钥目标：${escape(report?.account_label || target?.label || profile?.label || "检查时自动识别")}</span></div><div class="capture-layout"><ol id="capture-timeline" class="journey" aria-label="微信连接进度">${captureTimeline(phase)}</ol><div class="capture-main">
+    `<div class="account-strip"><button id="back-to-setup" class="text-button">← 返回接入设置</button><span id="selected-account">本次取钥目标：${escape(report?.account_label || target?.label || profile?.label || "检查时自动识别")}${root && !active ? '<button id="capture-edit-name" class="text-button">显示名称</button>' : ""}</span></div><div class="capture-layout"><ol id="capture-timeline" class="journey" aria-label="微信连接进度">${captureTimeline(phase)}</ol><div class="capture-main">
     <section class="card" id="capture-task">
       <div class="step-heading"><h2>${active ? "按提示完成微信登录" : completed || alreadyConnected ? "微信连接已完成" : report?.ready ? "检查通过，可以连接" : "首次连接微信 · 取钥向导"}</h2><p>${active ? "请留在这个向导，下一步操作会在这里明确提示。" : completed || alreadyConnected ? "凭据已安全保存，可以继续选择会话。" : report?.ready ? (report.account_mode === "login" ? "监听准备好后再登录，随后自动识别账号并验证资料。" : "准备好暂时中断微信使用后，再开始取钥。") : "先检查这台 Mac，确认账号、读取权限与兼容条件。"}</p></div>
       <div id="capture-preparation" ${active || completed || alreadyConnected ? "hidden" : ""}>
@@ -864,8 +935,18 @@ function keytool() {
     </section>
     <details class="card" id="permission-options"><summary>权限帮助</summary><p class="muted">在系统设置中允许 NoteBridge 读取微信资料。列表中没有应用时，将权限帮助窗口中的图标拖入列表，开启后点击「重新连接」。</p><div class="actions"><button id="open-privacy">完整磁盘访问设置</button><button id="open-app-management">App 管理设置</button></div></details>
   </div></div>
-  <details id="existing-options" class="card"><summary>已有密钥或备份 · 手动导入</summary><p class="muted">首次连接无需填写路径。已有凭据可在这里导入；不要将密钥粘贴到聊天或日志。</p><div class="form"><label>数据库目录<div class="field-action"><input id="db-root" value="${escape(root)}" placeholder="自动识别或选择 db_storage 目录"><button id="pick-root">选择目录</button></div></label><div><button id="find-accounts">识别本机账号</button><div id="account-choices" class="choice-list"></div></div><label>密钥文件<div class="field-action"><input id="key-file" placeholder="选择现有密钥文件"><button id="pick-key">选择文件</button></div></label>${field("账号备注", "profile-label", report?.account_label || target?.label || profile?.label || "")}</div><div class="actions"><button id="import-key" class="primary">验证并保存凭据</button></div><div class="subsection"><h3>加密备份与恢复</h3><p class="muted">请单独保管备份口令，工具不会保存它。</p>${field("备份 / 恢复口令 · 至少 12 个字符", "backup-password", "", "password")}<div class="actions"><button id="backup-key" ${targetIsSaved ? "" : "disabled"}>下载当前凭据备份</button><button id="restore-key">导入加密备份</button><input id="backup-file" type="file" accept=".json" hidden></div></div></details>
+  <details id="existing-options" class="card"><summary>已有密钥或备份 · 手动导入</summary><p class="muted">首次连接无需填写路径。已有凭据可在这里导入；不要将密钥粘贴到聊天或日志。</p><div class="form"><label>数据库目录<div class="field-action"><input id="db-root" value="${escape(root)}" placeholder="自动识别或选择 db_storage 目录"><button id="pick-root">选择目录</button></div></label><div><button id="find-accounts">识别本机账号</button><div id="account-choices" class="choice-list"></div></div><label>密钥文件<div class="field-action"><input id="key-file" placeholder="选择现有密钥文件"><button id="pick-key">选择文件</button></div></label>${field("账号备注", "profile-label", accountReport?.accounts.find((a) => a.db_root === root)?.custom_label || "")}</div><div class="actions"><button id="import-key" class="primary">验证并保存凭据</button></div><div class="subsection"><h3>加密备份与恢复</h3><p class="muted">请单独保管备份口令，工具不会保存它。</p>${field("备份 / 恢复口令 · 至少 12 个字符", "backup-password", "", "password")}<div class="actions"><button id="backup-key" ${targetIsSaved ? "" : "disabled"}>下载当前凭据备份</button><button id="restore-key">导入加密备份</button><input id="backup-file" type="file" accept=".json" hidden></div></div></details>
   <details class="card" id="capture-history"><summary>历史取钥任务与恢复</summary><p class="muted">中断的任务可在这里继续。如恢复未完成，请先恢复官方客户端。</p><button id="refresh-captures">刷新任务</button><div id="capture-sessions"></div></details>`;
+  bind("capture-edit-name", () =>
+    editAccountName(
+      accountReport?.accounts.find((a) => a.db_root === root) ||
+        report?.accounts?.find((a) => a.db_root === root) || {
+          db_root: root,
+          label: profile?.label || "",
+          credential_saved: !!targetIsSaved,
+        },
+    ),
+  );
   const checkTarget = async (db_root, discover_account = false) => {
     captureReadiness = await action(
       "connection-check",
@@ -919,7 +1000,7 @@ function keytool() {
         b.textContent = r.label + (r.active ? " · 当前登录" : " · 历史账号");
         b.onclick = () => {
           $("#db-root").value = r.db_root;
-          $("#profile-label").value = r.label;
+          $("#profile-label").value = r.custom_label || "";
           captureReadiness = null;
           $("#capture-start").disabled = true;
         };

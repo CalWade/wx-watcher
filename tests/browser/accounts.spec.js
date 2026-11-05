@@ -159,3 +159,62 @@ test("denied access offers permission help only on request and never reports old
   await expect(page.locator("#db-root")).toHaveValue("");
   await expect(page.locator("#continue-setup")).toHaveCount(0);
 });
+
+test("account names can be edited without switching account or touching credentials", async ({
+  page,
+}) => {
+  const report = sampleReport();
+  report.current.custom_label = "";
+  report.current.account_id = "wxid_currentdemo_abcd";
+  await mockReport(page, () => report);
+  let submitted;
+  await page.route("**/api/action/account-name", (route) => {
+    submitted = route.request().postDataJSON();
+    report.current.custom_label = submitted.label;
+    report.current.label = submitted.label;
+    return route.fulfill({ status: 202, json: { job_id: "rename-account" } });
+  });
+  await page.route("**/api/job?id=rename-account", (route) =>
+    route.fulfill({
+      json: {
+        status: "completed",
+        result: report.current,
+      },
+    }),
+  );
+  await page.goto("/#token=browser-fixture-token&page=setup");
+  await page.locator("#account-list").evaluate((el) => (el.open = true));
+  await page.locator('[data-name-index="0"]').click();
+  await expect(page.locator("#account-name-dialog")).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 780 });
+  const bounds = await page.locator("#account-name-dialog").boundingBox();
+  expect(bounds.x).toBeGreaterThanOrEqual(0);
+  expect(bounds.x + bounds.width).toBeLessThanOrEqual(390);
+  await page.setViewportSize({ width: 1160, height: 900 });
+  if (process.env.NOTE_BRIDGE_SCREENSHOTS)
+    await page.screenshot({ path: "docs/images/account-name-edit.png" });
+  await expect(page.locator("#account-name-refresh")).toBeDisabled();
+  await page.locator("#account-name-input").fill("客户服务号 <img src=x>");
+  await page.locator("#account-name-save").click();
+  await expect(page.locator("#account-name-dialog")).not.toBeVisible();
+  await expect(page.locator("#wechat-current-account")).toHaveText(
+    "客户服务号 <img src=x>",
+  );
+  await expect(page.locator("#wechat-current-account img")).toHaveCount(0);
+  await expect(page.locator("#project-selected-account")).toHaveText(
+    "先前保存的账号",
+  );
+  expect(submitted).toEqual({
+    db_root: report.current.db_root,
+    label: "客户服务号 <img src=x>",
+  });
+  await page.locator("#use-current-account").click();
+  await expect(page.locator("#selected-account")).toContainText(
+    "客户服务号 <img src=x>",
+  );
+  await page.locator("#capture-edit-name").click();
+  await expect(page.locator("#account-name-input")).toHaveValue(
+    "客户服务号 <img src=x>",
+  );
+  await page.locator("#account-name-cancel").click();
+});

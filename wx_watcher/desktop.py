@@ -97,7 +97,7 @@ def create_desktop(controller: Controller, token: str, port=0):
                     return self.send(
                         200,
                         {
-                            "version": "0.4.3",
+                            "version": "0.4.4",
                             "services": controller.services.status(),
                             "records": controller.records(),
                             "jobs": list(controller.jobs.values())[-20:],
@@ -145,6 +145,8 @@ def create_desktop(controller: Controller, token: str, port=0):
                 "doctor",
                 "accounts",
                 "account-status",
+                "account-name",
+                "refresh-account-name",
                 "conversations",
                 "import-key",
                 "verify-key",

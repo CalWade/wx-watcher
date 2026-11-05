@@ -92,17 +92,50 @@ class AppState:
             raise ValueError("请先连接微信账号并验证密钥")
         return matches[0]
 
+    def account_display(self, root, settings=None):
+        from .account_names import display_name
+
+        root = str(Path(root).expanduser().resolve())
+        settings = settings if settings is not None else self.load()
+        profile = next((p for p in settings["profiles"] if p["db_root"] == root), None)
+        return display_name(root, settings.get("account_names", {}).get(root), profile)
+
+    def save_account_names(self, root, **values):
+        from .account_names import clean_label
+
+        root = str(Path(root).expanduser().resolve())
+        if "custom_label" in values:
+            values["custom_label"] = clean_label(values["custom_label"])
+        with self.lock:
+            state = self.load()
+            names = state.get("account_names", {})
+            entry = names.setdefault(root, {})
+            entry.setdefault(
+                "custom_label", self.account_display(root, state)["custom_label"]
+            )
+            entry.update(values)
+            state["account_names"] = names
+            label = self.account_display(root, state)["label"]
+            for profile in state["profiles"]:
+                if profile["db_root"] == root:
+                    profile["label"] = label
+            self.update(account_names=names, profiles=state["profiles"])
+            return self.account_display(root)
+
     def add_profile(self, root: Path, key_ref: str, label="", verification=None):
         root = root.expanduser().resolve()
         if not (root / "contact/contact.db").is_file():
             raise ValueError("所选目录不是有效的微信 db_storage")
         with self.lock:
             state = self.load()
+            if label:
+                self.save_account_names(root, custom_label=label)
+                state = self.load()
             profile = {
                 "id": str(uuid.uuid4()),
                 "db_root": str(root),
                 "key_ref": key_ref,
-                "label": label or root.parent.name,
+                "label": self.account_display(root, state)["label"],
                 "verification": verification or {},
             }
             profiles = [p for p in state["profiles"] if p["db_root"] != str(root)]

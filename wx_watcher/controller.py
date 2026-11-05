@@ -7,6 +7,7 @@ import re
 import shutil
 import socket
 import sqlite3
+import subprocess
 import sys
 import threading
 import time
@@ -122,7 +123,7 @@ class Controller:
             active = set(active_roots())
             return [
                 {
-                    "label": p.name,
+                    **self.state.account_display(p / "db_storage"),
                     "db_root": str(p / "db_storage"),
                     "active": (p / "db_storage").resolve() in active,
                 }
@@ -160,6 +161,12 @@ class Controller:
             )
         for root, account in rows.items():
             profile = profiles.get(root)
+            display = self.state.account_display(root, saved)
+            # Preserve a friendly name supplied by an alternate discovery source.
+            if display["name_known"] or account.get("label") == Path(root).parent.name:
+                account.update(display)
+            else:
+                account.update({k: v for k, v in display.items() if k != "label"})
             account.update(
                 profile_id=profile["id"] if profile else "",
                 credential_saved=bool(profile and profile.get("key_ref")),
@@ -201,6 +208,42 @@ class Controller:
             "matches_current": matches,
             "accounts": list(rows.values()),
         }
+
+    def refresh_account_names(self, root, quiet=False):
+        from .account_names import read_identity
+
+        profile = next(
+            (p for p in self.state.load()["profiles"] if p["db_root"] == str(root)),
+            None,
+        )
+        if not profile:
+            raise ValueError(
+                "请先连接并验证此账号，之后才能读取微信昵称和微信号；现在可以先填写本地备注"
+            )
+        try:
+            reader = SnapshotReader(
+                Config(
+                    db_root=Path(root),
+                    key_file=Path("/nonexistent"),
+                    state_dir=self.state.home / "preview" / profile["id"],
+                    key_ref=profile["key_ref"],
+                    sqlcipher=default_sqlcipher(),
+                )
+            )
+            identity = read_identity(reader, root)
+            if not any(identity.values()):
+                raise ValueError(
+                    "这份本地资料中未找到可确认的本人昵称或微信号，可以先使用本地备注"
+                )
+            result = self.state.save_account_names(
+                root, **identity, identity_profile_id=profile["id"]
+            )
+            return {**result, "message": "微信昵称与微信号已更新，本地备注会保留"}
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+            if not quiet:
+                raise
+            self.state.save_account_names(root, identity_profile_id=profile["id"])
+            return self.state.account_display(root)
 
     def require_current_account(self, profile=None):
         from .discovery import active_roots
@@ -268,6 +311,8 @@ class Controller:
         # Keep account/configuration changes atomic with service start and stop.
         if operation in {
             "settings",
+            "account-name",
+            "refresh-account-name",
             "import-key",
             "restore-key",
             "feishu-secret",
@@ -359,6 +404,15 @@ class Controller:
             return self.accounts()
         if operation == "account-status":
             return self.account_status()
+        if operation in {"account-name", "refresh-account-name"}:
+            root = str(Path(str(data.get("db_root", ""))).expanduser().resolve())
+            if root not in {a["db_root"] for a in self.account_status()["accounts"]}:
+                raise ValueError("请选择已识别的微信账号")
+            if operation == "refresh-account-name":
+                return self.refresh_account_names(root)
+            return self.state.save_account_names(
+                root, custom_label=data.get("label", "")
+            )
         if operation == "conversations":
             return self.conversations(str(data.get("query", ""))[:100])
         if operation == "import-key":
@@ -376,6 +430,7 @@ class Controller:
                 {k: v for k, v in answer.items() if k not in {"key_ref"}},
             )
             self.preview_reader = None
+            self.refresh_account_names(str(root), quiet=True)
             return {
                 "connected": True,
                 "verified": answer["verified"],
@@ -383,13 +438,16 @@ class Controller:
             }
         if operation == "verify-key":
             p = self.state.profile()
-            return native_request(
+            result = native_request(
                 {
                     "operation": "verify",
                     "db_root": p["db_root"],
                     "key_ref": p["key_ref"],
                 }
             )
+            if result.get("all_verified"):
+                self.refresh_account_names(p["db_root"], quiet=True)
+            return result
         if operation == "backup-key":
             return native_request(
                 {
@@ -413,6 +471,7 @@ class Controller:
             self.state.add_profile(
                 root, result["key_ref"], str(data.get("label", "")), result
             )
+            self.refresh_account_names(str(root), quiet=True)
             return {
                 "connected": True,
                 "verified": result["verified"],
@@ -522,6 +581,8 @@ class Controller:
                     feishu_chat_id="", feishu_chat_name="", send_enabled=False
                 )
             self.state.update(**values)
+            if "active_profile" in values:
+                self.refresh_account_names(profile["db_root"], quiet=True)
             if switching:
                 if self.preview_reader is not None:
                     self.preview_reader.close()
@@ -709,11 +770,31 @@ class Controller:
         if operation == "capture-status":
             from .keyflow import KeyFlow
 
-            return KeyFlow(self.state).status(str(data["capture_id"]))
+            result = KeyFlow(self.state).status(str(data["capture_id"]))
+            profile = next(
+                (
+                    p
+                    for p in self.state.load()["profiles"]
+                    if p["db_root"] == result.get("db_root")
+                ),
+                None,
+            )
+            if result.get("phase") == "completed" and profile:
+                names = (
+                    self.state.load()
+                    .get("account_names", {})
+                    .get(profile["db_root"], {})
+                )
+                if names.get("identity_profile_id") != profile["id"]:
+                    self.refresh_account_names(profile["db_root"], quiet=True)
+                result["account_label"] = self.state.account_display(
+                    profile["db_root"]
+                )["label"]
+            return result
         if operation == "diagnostics":
             s = self.state.load()
             return {
-                "version": "0.4.3",
+                "version": "0.4.4",
                 "environment": self.doctor(),
                 "services": self.services.status(),
                 "profile_count": len(s["profiles"]),

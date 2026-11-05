@@ -1100,3 +1100,7 @@ footer {
 .capture-account-picker {
   margin: 24px 0;
 }
+
+#account-list .row > .actions {
+  margin-top: 0;
+}

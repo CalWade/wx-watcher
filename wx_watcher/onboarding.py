@@ -92,7 +92,7 @@ def check_first_connection(controller, requested_root=""):
         not denied,
         "未发现权限拒绝；有本地数据库后还会再次验证"
         if not denied
-        else "请在完整磁盘访问权限允许本应用。列表中没有时，将窗口底部应用图标拖入列表，开启后点「重新连接」。",
+        else "请在完整磁盘访问权限允许本应用。列表中没有时，将权限帮助窗口中的应用图标拖入列表，开启后点「重新连接」。",
         "privacy",
     )
     initialized = bool(root) and native.get("database_readable", False)

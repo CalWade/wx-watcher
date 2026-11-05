@@ -67,6 +67,7 @@ test("capture requires a separate login-page confirmation before login readiness
   page,
 }) => {
   await more(page, "keytool");
+  await expect(page.locator("#capture-task")).toBeVisible();
   await expect(page.locator("#capture-login-ready")).toBeHidden();
   if (await page.locator("#recapture").isVisible())
     await page.locator("#recapture").click();

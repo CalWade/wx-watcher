@@ -10,7 +10,7 @@
 - Use in-page confirmation dialogs in both browser and native WebView, and show empty search results directly in the active step.
 - Connect DSH and cost-meter without modifying unrelated WeChat or Feishu settings. Show custom Feishu credentials immediately after transport selection.
 - Clear the old Feishu destination and automatic delivery when switching transport or application identity.
-- Wrap the native permission helper at narrow window sizes and set a minimum usable native window size.
+- Remove the permanent native permission footer; show a separate closable helper only when requested, and set a minimum usable native window size.
 
 ## 0.3.1
 

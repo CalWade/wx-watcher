@@ -124,3 +124,38 @@ test("saved current account can be verified and selected without reusing old con
   await page.locator('[data-step="5"]').click();
   await expect(page.locator("#send-enabled")).not.toBeChecked();
 });
+
+test("denied access offers permission help only on request and never reports old credentials as connected", async ({
+  page,
+}) => {
+  const old = sampleReport().selected;
+  await mockReport(page, () => ({
+    code: "unavailable",
+    message: "需要允许读取微信资料",
+    current: null,
+    selected: old,
+    matches_current: false,
+    accounts: [old],
+  }));
+  await page.addInitScript(() => {
+    window.permissionRequests = [];
+    window.webkit = {
+      messageHandlers: {
+        native: {
+          postMessage: (value) => window.permissionRequests.push(value.kind),
+        },
+      },
+    };
+  });
+  await page.goto("/#token=browser-fixture-token&page=setup");
+  await expect(page.locator("#account-privacy")).toBeVisible();
+  expect(await page.evaluate(() => window.permissionRequests)).toEqual([]);
+  await page.locator("#account-privacy").click();
+  expect(await page.evaluate(() => window.permissionRequests)).toEqual([
+    "open-privacy",
+  ]);
+  await page.locator("#first-connect").click();
+  await expect(page.locator("#capture-check")).toBeVisible();
+  await expect(page.locator("#db-root")).toHaveValue("");
+  await expect(page.locator("#continue-setup")).toHaveCount(0);
+});

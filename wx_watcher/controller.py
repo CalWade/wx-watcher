@@ -707,7 +707,7 @@ class Controller:
         if operation == "diagnostics":
             s = self.state.load()
             return {
-                "version": "0.4.0",
+                "version": "0.4.1",
                 "environment": self.doctor(),
                 "services": self.services.status(),
                 "profile_count": len(s["profiles"]),

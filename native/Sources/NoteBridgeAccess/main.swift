@@ -133,7 +133,7 @@ func request(_ input: [String: Any], internalRead: Bool) throws -> [String: Any]
         let defaultStatus = SecKeychainCopyDefault(&chain)
         var keychainStatus: SecKeychainStatus = 0
         let probeStatus = chain.map { SecKeychainGetStatus($0, &keychainStatus) } ?? errSecNoSuchKeychain
-        return ["ok": true, "version": "0.4.0", "platform": "macOS",
+        return ["ok": true, "version": "0.4.1", "platform": "macOS",
                 "os": ProcessInfo.processInfo.operatingSystemVersionString,
                 "lldb": lldbExecutable() ?? "",
                 "keychain_service": CredentialNamespace.service, "keychain_default_status": defaultStatus,
@@ -196,12 +196,15 @@ func request(_ input: [String: Any], internalRead: Bool) throws -> [String: Any]
     }
 }
 
-if let index = CommandLine.arguments.firstIndex(of: "--capture-job"), CommandLine.arguments.count > index+1 {
+if let index = CommandLine.arguments.firstIndex(of: "--suspend-wechat-job"), CommandLine.arguments.count == index+2 {
+    do { output(["pid": try launchSuspendedWeChatForJob(CommandLine.arguments[index+1])]) }
+    catch { output(["ok": false, "error": "wechat_suspended_launch_failed"]); exit(2) }
+} else if let index = CommandLine.arguments.firstIndex(of: "--capture-job"), CommandLine.arguments.count > index+1 {
     do { try runCaptureJob(CommandLine.arguments[index+1], recoverOnly: CommandLine.arguments.contains("--recover")) }
     catch let ToolError.invalid(code) { output(["ok": false, "error": code]); exit(2) }
     catch { output(["ok": false, "error": "capture_transaction_failed"]); exit(2) }
 } else if CommandLine.arguments.contains("--help") {
-    print("notebridge-access 0.4.0 — local WeChat database credentials\nRead one JSON request from stdin: doctor, verify, store, export_backup, import_backup, delete.\nSecret input is never accepted in process arguments. Internal reader use requires --internal-read.")
+    print("notebridge-access 0.4.1 — local WeChat database credentials\nRead one JSON request from stdin: doctor, verify, store, export_backup, import_backup, delete.\nSecret input is never accepted in process arguments. Internal reader use requires --internal-read.")
 } else {
     do {
         let raw = FileHandle.standardInput.readDataToEndOfFile()

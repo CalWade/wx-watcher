@@ -75,6 +75,20 @@ public struct LLDBPassphraseCapture: Sendable {
   /// WX Watcher addition: cancellation follows the same detach/cleanup path as a timeout.
   public var isCancelled: (@Sendable () -> Bool)?
 
+  /// Called before detaching after a failed/cancelled attempt. The managed
+  /// launcher uses this to terminate a still-suspended owned target safely.
+  public var beforeFailureCleanup: (@Sendable () -> Void)?
+
+  /// Captures only this controlled process; never attaches to a replacement
+  /// that may already have shown a login window.
+  public func capture(processID: pid_t, architecture: LLDBTargetArchitecture = .current,
+                      timeoutSeconds: Int = defaultTimeoutSeconds) throws -> PassphraseSecret {
+    guard lldbAvailable else { throw CaptureError.lldbUnavailable }
+    emit("attaching to WeChat process \(processID)")
+    return try runSingleCapture(processID: processID, architecture: architecture,
+                                deadline: Date().addingTimeInterval(TimeInterval(timeoutSeconds)))
+  }
+
   private func emit(_ message: String) {
     outputHandler?(message)
   }
@@ -128,6 +142,7 @@ public struct LLDBPassphraseCapture: Sendable {
     environment["TERM"] = "dumb"
     process.environment = environment
     process.executableURL = URL(fileURLWithPath: lldbPath)
+    process.arguments = ["--no-lldbinit"]
     process.standardInput = input
     process.standardOutput = output
     process.standardError = output
@@ -148,7 +163,9 @@ public struct LLDBPassphraseCapture: Sendable {
       output.fileHandleForReading.readabilityHandler = nil
       throw CaptureError.lldbLaunchFailed
     }
+    var succeeded = false
     defer {
+      if !succeeded { beforeFailureCleanup?() }
       output.fileHandleForReading.readabilityHandler = nil
       verboseRelay?.flush()
       // Only ever terminate the child spawned here. On a successful capture the
@@ -182,11 +199,12 @@ public struct LLDBPassphraseCapture: Sendable {
     var reportedAttached = false
     var reportedArmed = false
     var reportedRunning = false
-    let attachDeadline = min(deadline, Date().addingTimeInterval(30))
+    let attachDeadline = min(deadline, Date().addingTimeInterval(90))
     while Date() < deadline {
       if isCancelled?() == true { throw CaptureError.cancelled }
       let current = accumulator.current()
       if let captured = LLDBOutputParser.parsePassphrase(from: current) {
+        succeeded = true
         return try Self.makeSecret(consuming: captured)
       }
       let lines = current.split(whereSeparator: \.isNewline).map {
@@ -201,10 +219,13 @@ public struct LLDBPassphraseCapture: Sendable {
         emit("login key breakpoint installed")
       }
       if reportedArmed, !reportedRunning,
-        lines.contains(where: { $0.hasPrefix("Process ") && $0.contains(" resuming") })
+        lines.contains("GB_CAPTURE_RUNNING")
       {
         reportedRunning = true
         emit("capture ready; WeChat resumed and can be used for login")
+      }
+      if lines.contains(where: { $0.hasPrefix("RuntimeError:") && $0.contains("GB_CAPTURE_SETUP_FAILED") }) {
+        throw CaptureError.attachFailed("listener_setup_failed")
       }
       if !reportedAttachFailure, let detail = LLDBOutputParser.detectAttachFailure(in: current) {
         reportedAttachFailure = true
@@ -215,14 +236,15 @@ public struct LLDBPassphraseCapture: Sendable {
         throw CaptureError.targetExited
       }
       if !reportedRunning, Date() >= attachDeadline {
-        emit("capture did not reach the running state within 30 seconds; detaching")
-        throw CaptureError.attachFailed("login breakpoint setup did not finish within 30 seconds")
+        emit("capture did not reach the running state within 90 seconds; detaching")
+        throw CaptureError.attachFailed(reportedAttached ? "listener_setup_timeout" : "attach_timeout")
       }
       if !process.isRunning {
         // Give the readability handler a moment to flush the final output.
         Thread.sleep(forTimeInterval: 0.1)
         let final = accumulator.current()
         if let captured = LLDBOutputParser.parsePassphrase(from: final) {
+          succeeded = true
           return try Self.makeSecret(consuming: captured)
         }
         if let detail = LLDBOutputParser.detectAttachFailure(in: final) {

@@ -130,7 +130,7 @@ class FixtureController(Controller):
                 ],
             }
         if operation == "capture-start":
-            self.capture_phase = "awaiting_login_page"
+            self.capture_phase = "preparing_listener"
             return {"capture_id": "synthetic-capture", "phase": self.capture_phase}
         if operation == "capture-login-ready":
             self.capture_phase = "ready_for_login"
@@ -141,8 +141,8 @@ class FixtureController(Controller):
         if operation == "capture-status":
             return {
                 "phase": self.capture_phase,
-                "message": "请先停在登录页确认"
-                if self.capture_phase == "awaiting_login_page"
+                "message": "正在准备监听，完成后微信会自动打开；无需操作。"
+                if self.capture_phase == "preparing_listener"
                 else "监听已就绪，可以登录",
             }
         if operation == "install-dsh":

@@ -63,7 +63,7 @@ test("credential page never displays secret material", async ({ page }) => {
   );
   await expect(page.locator("#key-file")).toBeHidden();
 });
-test("capture requires a separate login-page confirmation before login readiness", async ({
+test("capture automatically prepares listener before allowing login", async ({
   page,
 }) => {
   await more(page, "keytool");
@@ -74,14 +74,30 @@ test("capture requires a separate login-page confirmation before login readiness
   await page.locator("#capture-check").click();
   await page.locator("#capture-start").click();
   await page.locator("#confirm-yes").click();
-  await expect(page.locator("#capture-login-ready")).toBeVisible();
-  await expect(page.locator("#capture-progress")).toContainText("先停在登录页");
+  await expect(page.locator("#capture-login-ready")).toBeHidden();
+  await expect(page.locator("#capture-progress")).toContainText("正在准备监听");
+  await expect(page.locator("#capture-progress")).toContainText("正在准备监听");
   await expect(page.locator("#notice")).not.toContainText(
     "现在可以点击微信登录",
   );
-  await page.locator("#capture-login-ready").click();
+  // Simulate the native listener becoming ready, with no user confirmation.
+  await page.route("**/api/action/capture-status", (route) =>
+    route.fulfill({
+      status: 202,
+      json: { job_id: "listener-ready" },
+    }),
+  );
   await expect(page.locator("#capture-login-ready")).toBeHidden();
+  await page.route("**/api/job?id=listener-ready", (route) =>
+    route.fulfill({
+      json: {
+        status: "completed",
+        result: { phase: "ready_for_login", message: "监听已就绪，可以登录" },
+      },
+    }),
+  );
   await expect(page.locator("#capture-progress")).toContainText("监听已就绪");
+  await page.unroute("**/api/action/capture-status");
   await page.locator("#capture-cancel").click();
   await expect(page.locator("#capture-check")).toBeVisible();
   await expect(page.locator("#capture-check")).toBeEnabled();

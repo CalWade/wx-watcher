@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.1
+
+- Start WeChat suspended under the signed-in macOS user, install the key listener, then allow its login window to run. Remove the manual login-page confirmation from new capture jobs.
+- Check debugger setup before resuming; stop on setup failure, process exit or invalid candidates. Clean up stopped processes before restoring the official client.
+- Allow up to 90 seconds for debugger setup and retain a 10-minute overall deadline.
+- Add opt-in real LLDB tests against a disposable program for first-call capture, cancellation and failed setup; update the first-run guide and UI tests. Real WeChat acceptance of this new launch path is still pending.
+
 ## 0.4.0
 
 - Reduce primary navigation to Workbench and Setup; move knowledge, credential maintenance and diagnostics into More.

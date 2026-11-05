@@ -58,7 +58,7 @@ class KeyFlow:
             )
         elif not active:
             result["account_hint"] = (
-                "微信可停在登录页准备。工具重开微信后，请先停在登录页并点击向导确认，等监听就绪再登录所选账号。"
+                "工具会先准备好监听，再自动打开微信。微信打开后，登录所选账号即可。"
             )
         elif not result.get("database_readable", False) and not result.get(
             "permission_hint"
@@ -71,8 +71,8 @@ class KeyFlow:
             "账号确认",
             "数据访问与 App 管理权限",
             "官方客户端备份",
-            "停在登录页并确认",
-            "监听就绪",
+            "自动准备监听",
+            "监听就绪后打开微信",
             "登录所选账号",
             "密钥验证",
             "恢复客户端",

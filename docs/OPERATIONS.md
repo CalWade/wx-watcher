@@ -15,9 +15,9 @@
 在应用「运行诊断」中可开启/关闭登录启动。源码或无图形环境可安装用户级 LaunchAgent：
 
 ```sh
-uv run wx-watcher service install
-uv run wx-watcher service status
-uv run wx-watcher service uninstall
+uv run notebridge service install
+uv run notebridge service status
+uv run notebridge service uninstall
 ```
 
 应用包安装后，下次登录在菜单栏启动原生应用，不主动弹出主窗口；源码环境启动本地后台。需要自动监控时，同时在应用里开启「打开本应用后自动恢复监控」。
@@ -63,7 +63,7 @@ cost-meter 金额为估算，未知价格不应解释为免费。
 
 ## 私有数据与备份
 
-默认应用目录在 `~/Library/Application Support/WXWatcher`。
+默认应用目录在 `~/Library/Application Support/NoteBridge`。
 Keychain 保存密钥和 App Secret；配置和任务保存在各账号/会话私有子目录。
 备份时先暂停服务，保存配置、任务 SQLite、必要资料，以及凭据的加密备份。
 不要直接复制正在写入的 SQLite 单个文件而漏掉 WAL；使用一致备份。
@@ -94,6 +94,6 @@ DSH 会话、桥接任务文件和 cost-meter 账本由 DSH 管理，不受此�
 ## 卸载
 
 先暂停并退出应用，移除用户级启动配置，再移除应用。
-只删除 DSH patch 中本项目的 `wx-reply-agent` 条目，保留其他模型和插件配置。
+只删除 DSH patch 中本项目的 `notebridge` 条目，保留其他模型和插件配置。
 是否删除任务、加密备份、Keychain 凭据由用户决定，默认保留成果。
 未完成客户端恢复的官方备份不得直接清理。

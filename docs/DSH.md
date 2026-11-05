@@ -12,14 +12,14 @@
 ## 操作步骤
 
 1. 确认 DSH 的模型配置正常。「自动识别并连接」会复用费用插件；缺少时尝试通过已安装 Desktop 的官方安装入口补齐。
-2. 打开 WX Watcher →「连接与配置」→「安装 / 更新桥接插件」。
-3. 安装器只添加或更新自己拥有的 `wx-reply-agent` 条目，并备份原 patch 到私有目录。
+2. 打开 NoteBridge →「连接与配置」→「安装 / 更新桥接插件」。
+3. 安装器只添加或更新自己拥有的 `notebridge` 条目，并备份原 patch 到私有目录。
 4. 确认桥接状态 ready；若没有就绪，在 DSH 插件日志检查缺失服务。
 5. 点击「测试模型与记账」。此操作会产生一次真实模型用量。
 6. 成功结果应有建议内容、对应 session_id、Token 用量和 cost-meter 会话记录。
 
-默认 profile 为 `~/.dsh/profiles/desktop`，数据为 `~/.dsh/storages/wx-reply-agent`。
-如果使用其他 DSH_HOME，给 DSH 和 WX Watcher 设置相同的环境变量。
+默认 profile 为 `~/.dsh/profiles/desktop`，数据为 `~/.dsh/storages/notebridge`。
+如果使用其他 DSH_HOME，给 DSH 和 NoteBridge 设置相同的环境变量。
 原生宿主 SDK 优先从当前 DSH 运行环境解析；特殊安装可配置 `DSH_HOST_PACKAGE_JSON`。
 
 ## 运行契约
@@ -36,7 +36,7 @@ Agent 使用当前默认渠道。模型看不到执行工具，工具调用也�
 
 桥接采用按源文件 SHA 分目录的版本，避免 ESM 缓存继续运行旧代码。
 更新只停用本条目，再启用新文件；不会主动退出其他 DSH 会话。
-如需移除，只删除自己的 `wx-reply-agent` 条目。不要用历史完整配置备份覆盖后来的用户修改。
+如需移除，只删除自己的 `notebridge` 条目。不要用历史完整配置备份覆盖后来的用户修改。
 会话与费用账本保留，由 DSH 自己管理。
 
 ## 常见故障
@@ -51,7 +51,7 @@ Agent 使用当前默认渠道。模型看不到执行工具，工具调用也�
 
 ## 从空白 DSH 环境安装 cost-meter
 
-已有插件且测试正常时继续复用，不需要为了 WX Watcher 升级。没有插件时：
+已有插件且测试正常时继续复用，不需要为了 NoteBridge 升级。没有插件时：
 
 1. 从 [DSH 官方 Releases](https://github.com/deepseek-ai/deepseek-harness/releases)
    安装 Desktop，至少正常启动一次，让它创建 desktop Profile。
@@ -67,7 +67,7 @@ Agent 使用当前默认渠道。模型看不到执行工具，工具调用也�
 4. 重新打开 Desktop，在费用设置确认插件加载。需要 pnpm 时复用现有兼容版本；
    包管理器报错应修复真实环境，不修改其他模型渠道。
 5. 先在 DSH 普通会话问一个简短问题，确认能返回内容且费用面板有相应记录。
-6. 再打开 WX Watcher 安装桥接并点击模型测试。若改用新 DSH / cost-meter 版本，
+6. 再打开 NoteBridge 安装桥接并点击模型测试。若改用新 DSH / cost-meter 版本，
    重新验证宿主服务契约与记账；上面的固定版本不是对新版宿主的兼容承诺。
 
 桥接正常测试至少应满足：ready=true、tools=0、cost_meter.found=true。

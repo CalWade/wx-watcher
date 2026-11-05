@@ -8,8 +8,9 @@ func probeWeChatDirectory() -> Bool {
     let fm = FileManager.default
     let home = fm.homeDirectoryForCurrentUser
     let container = home.appendingPathComponent("Library/Containers/com.tencent.xinWeChat")
-    let settingsHome = ProcessInfo.processInfo.environment["WX_WATCHER_HOME"].map { URL(fileURLWithPath: $0) }
-        ?? home.appendingPathComponent("Library/Application Support/WXWatcher")
+    let environment = ProcessInfo.processInfo.environment
+    let settingsHome = (environment["NOTE_BRIDGE_HOME"] ?? environment["WX_WATCHER_HOME"]).map { URL(fileURLWithPath: $0) }
+        ?? home.appendingPathComponent("Library/Application Support/NoteBridge")
     var target = container.appendingPathComponent("Data/Documents/xwechat_files")
     if let data = try? Data(contentsOf: settingsHome.appendingPathComponent("settings.json")),
        let state = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -52,19 +53,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     var item: NSStatusItem!
     var backend: Process?
     var timer: Timer?
-    let isKeytool = CommandLine.arguments.contains("--keytool") || (Bundle.main.object(forInfoDictionaryKey: "WXKeytoolMode") as? Bool == true)
+    let isKeytool = CommandLine.arguments.contains("--credentials") || CommandLine.arguments.contains("--keytool") || (Bundle.main.object(forInfoDictionaryKey: "NoteBridgeSetupMode") as? Bool == true)
     var baseURL: URL?
     var outputBuffer = Data()
     var terminationSignals: [DispatchSourceSignal] = []
     var privacyFooter: NSView!
     var footerHeight: NSLayoutConstraint!
+    var requestedLegacyShutdown = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         let bar = NSMenu()
         let appEntry = NSMenuItem(); bar.addItem(appEntry)
         let appMenu = NSMenu(); appEntry.submenu = appMenu
-        let quitItem = appMenu.addItem(withTitle: "退出 WX Watcher", action: #selector(quit), keyEquivalent: "q")
+        let quitItem = appMenu.addItem(withTitle: "退出 NoteBridge", action: #selector(quit), keyEquivalent: "q")
         quitItem.target = self
         let editEntry = NSMenuItem(); bar.addItem(editEntry)
         let editMenu = NSMenu(title: "编辑"); editEntry.submenu = editMenu
@@ -84,7 +86,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         web.navigationDelegate = self
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1160, height: 780),
             styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-        window.title = isKeytool ? "WX Keytool · 微信凭据" : "WX Watcher · 微信消息助手"
+        window.title = isKeytool ? "NoteBridge Setup · 连接配置" : "NoteBridge · 本地消息助手"
         let container = NSView()
         privacyFooter = NSView()
         container.addSubview(web); container.addSubview(privacyFooter)
@@ -124,7 +126,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             NSApp.activate(ignoringOtherApps: true)
         }
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.title = "WX"
+        item.button?.title = "NB"
         let menu = NSMenu()
         menu.addItem(withTitle: "打开消息助手", action: #selector(show), keyEquivalent: "")
         menu.addItem(withTitle: "退出应用与后台服务", action: #selector(quit), keyEquivalent: "q")
@@ -133,22 +135,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         launchBackend()
     }
     func launchBackend() {
-        if let override = ProcessInfo.processInfo.environment["WX_WATCHER_UI_URL"], let url = URL(string: override) {
+        web.loadHTMLString("<p>正在打开本机工作区并检查升级状态，请稍候…</p>", baseURL: nil)
+        let legacy = ["io.github.calwade.wx-watcher", "io.github.calwade.wx-keytool"]
+            .flatMap { NSRunningApplication.runningApplications(withBundleIdentifier: $0) }
+        if !legacy.isEmpty {
+            guard !requestedLegacyShutdown else {
+                web.loadHTMLString("<h1>旧版尚未退出</h1><p>请退出旧版应用，然后点击重新连接。已有配置和密钥仍然保留。</p>", baseURL: nil)
+                showPermissionHelp(); return
+            }
+            requestedLegacyShutdown = true
+            let legacyHome = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/WXWatcher")
+            if let bytes = try? Data(contentsOf: legacyHome.appendingPathComponent("services.json")),
+               let state = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any],
+               let pids = state["pids"] as? [String: Int],
+               pids.values.contains(where: { $0 > 1 && kill(pid_t($0), 0) == 0 }),
+               let request = try? JSONSerialization.data(withJSONObject: ["resume_monitor": true]) {
+                let file = legacyHome.appendingPathComponent("migration-request.json")
+                try? request.write(to: file, options: .atomic); _ = chmod(file.path, 0o600)
+            }
+            for app in legacy { app.terminate() }
+            DispatchQueue.global(qos: .utility).async {
+                let deadline = Date().addingTimeInterval(30)
+                while legacy.contains(where: { !$0.isTerminated }) && Date() < deadline { Thread.sleep(forTimeInterval: 0.1) }
+                DispatchQueue.main.async { self.launchBackend() }
+            }
+            return
+        }
+        let env = ProcessInfo.processInfo.environment
+        if let override = env["NOTE_BRIDGE_UI_URL"] ?? env["WX_WATCHER_UI_URL"], let url = URL(string: override) {
             baseURL = URL(string: "\(url.scheme ?? "http")://\(url.host ?? "127.0.0.1"):\(url.port ?? 80)")
             web.load(URLRequest(url: url)); return
         }
         guard let resources = Bundle.main.resourceURL else { return }
-        let executable = resources.appendingPathComponent("backend/wx-watcher")
+        let executable = resources.appendingPathComponent("backend/notebridge")
         guard FileManager.default.isExecutableFile(atPath: executable.path) else {
-            web.loadHTMLString("<h1>开发构建</h1><p>请使用 scripts/build_macos.py 构建完整应用，或设置 WX_WATCHER_UI_URL 连接开发服务。</p>", baseURL: nil)
+            web.loadHTMLString("<h1>开发构建</h1><p>请使用 scripts/build_macos.py 构建完整应用，或设置 NOTE_BRIDGE_UI_URL 连接开发服务。</p>", baseURL: nil)
             return
         }
         let process = Process()
         process.executableURL = executable
-        process.arguments = ["desktop", "--no-browser"] + (isKeytool ? ["--keytool"] : [])
+        process.arguments = ["desktop", "--no-browser"] + (isKeytool ? ["--credentials"] : [])
         var environment = ProcessInfo.processInfo.environment
-        environment["WX_KEYTOOL_BIN"] = resources.appendingPathComponent("wx-keytool").path
-        environment["WX_WATCHER_PARENT_PID"] = String(ProcessInfo.processInfo.processIdentifier)
+        environment["NOTE_BRIDGE_APP_NAME"] = Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String ?? "NoteBridge"
+        environment["NOTE_BRIDGE_ACCESS_BIN"] = resources.appendingPathComponent("notebridge-access").path
+        environment["NOTE_BRIDGE_PARENT_PID"] = String(ProcessInfo.processInfo.processIdentifier)
         process.environment = environment
         let pipe = Pipe()
         process.standardOutput = pipe
@@ -175,6 +205,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
                                 if !readable { DispatchQueue.main.async { self?.showPermissionHelp() } }
                             }
                         }
+                    } else if let json = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
+                              let error = json["desktop_error"] as? String {
+                        self.web.loadHTMLString("<h1>启动尚未完成</h1><p>请按系统提示处理后重新连接。数据和备份已保留。</p>", baseURL: nil)
+                        let alert = NSAlert(); alert.messageText = "NoteBridge 启动尚未完成"; alert.informativeText = error
+                        alert.beginSheetModal(for: self.window)
+                        self.showPermissionHelp()
                     }
                 }
             }

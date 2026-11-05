@@ -40,7 +40,7 @@ async function hostSDK(name) {
 }
 const { createUserMessage } = await hostSDK("@deepseek-ai/dsh-llm");
 
-export const name = "wx-reply-agent";
+export const name = "notebridge";
 export const inject = [
   "agents",
   "agentDefaultModel",
@@ -92,9 +92,27 @@ async function bodyOf(req) {
 export async function apply(ctx, config = {}) {
   const directory = path.join(
     process.env.DSH_HOME || path.join(os.homedir(), ".dsh"),
+    "storages/notebridge",
+  );
+  const legacyDirectory = path.join(
+    process.env.DSH_HOME || path.join(os.homedir(), ".dsh"),
     "storages/wx-reply-agent",
   );
-  const port = Number(config.port || process.env.WX_DSH_BRIDGE_PORT || 8766);
+  const exists = async (file) =>
+    fs.stat(file).then(
+      () => true,
+      () => false,
+    );
+  if (!(await exists(directory)) && (await exists(legacyDirectory)))
+    throw new Error(
+      "Existing bridge data requires migration through NoteBridge before this module starts",
+    );
+  const port = Number(
+    config.port ||
+      process.env.NOTE_BRIDGE_DSH_PORT ||
+      process.env.WX_DSH_BRIDGE_PORT ||
+      8766,
+  );
   if (!Number.isInteger(port) || port < 1024 || port > 65535)
     throw new Error("Invalid bridge port");
   await fs.mkdir(path.join(directory, "jobs"), {
@@ -115,7 +133,7 @@ export async function apply(ctx, config = {}) {
     if (error.code !== "EEXIST") throw error;
   }
   if ((await fs.stat(tokenFile)).mode & 0o077)
-    throw new Error("wx-reply-agent token must have mode 600");
+    throw new Error("notebridge token must have mode 600");
   const expected = Buffer.from(
     "Bearer " + (await fs.readFile(tokenFile, "utf8")).trim(),
   );
@@ -196,7 +214,7 @@ export async function apply(ctx, config = {}) {
           );
           agentCtx.systemPrompt.suppressRuntimeContext();
           agentCtx.systemPrompt.section({
-            name: "wx-reply-agent",
+            name: "notebridge",
             order: 0,
             complete: true,
             interpolate: false,
@@ -225,7 +243,7 @@ export async function apply(ctx, config = {}) {
       handle.agent.followup(
         createUserMessage({
           content: [{ type: "text", text: prompt }],
-          source: { kind: "wx-watcher", requestId: job.id },
+          source: { kind: "notebridge", requestId: job.id },
         }),
       );
       await handle.agent.whenIdle();
@@ -251,7 +269,7 @@ export async function apply(ctx, config = {}) {
       job.error = error.message?.startsWith("DSH ")
         ? error.message
         : "DSH inference failed; inspect the DSH session";
-      console.warn("[wx-reply-agent] job failed", job.id, error.name);
+      console.warn("[notebridge] job failed", job.id, error.name);
     } finally {
       clearTimeout(timer);
       job.finished_at = new Date().toISOString();
@@ -276,7 +294,7 @@ export async function apply(ctx, config = {}) {
         return response(res, 200, {
           ready: !closing,
           mode: "reply-only",
-          build: "0.2.0",
+          build: "0.3.0",
           source_digest: SOURCE_DIGEST,
           route: ctx.agentDefaultModel.currentSelection(),
           cost_meter: "dsh-cost-meter",
@@ -320,7 +338,7 @@ export async function apply(ctx, config = {}) {
         const job = {
           id: input.id,
           prompt_hash: digest(input.prompt),
-          session_id: "wx-reply-" + input.id,
+          session_id: "notebridge-" + input.id,
           status: "queued",
           created_at: new Date().toISOString(),
         };
@@ -337,7 +355,7 @@ export async function apply(ctx, config = {}) {
         pending = pending
           .then(() => run(job, input.prompt))
           .catch((error) => {
-            console.warn("[wx-reply-agent] queue error", error.name);
+            console.warn("[notebridge] queue error", error.name);
           });
         return response(res, 202, job);
       }
@@ -358,6 +376,6 @@ export async function apply(ctx, config = {}) {
     await pending;
   });
   console.log(
-    `[wx-reply-agent] reply-only bridge ready on 127.0.0.1:${port}; using host LLM and cost-meter`,
+    `[notebridge] reply-only bridge ready on 127.0.0.1:${port}; using host LLM and cost-meter`,
   );
 }

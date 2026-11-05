@@ -8,7 +8,7 @@ body:
     id: environment
     attributes:
       label: Versions / 环境版本
-      description: macOS, architecture, WeChat build, WX Watcher, DSH, cost-meter
+      description: macOS, architecture, WeChat build, NoteBridge, DSH, cost-meter
     validations:
       required: true
   - type: textarea

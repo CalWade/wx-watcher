@@ -2,9 +2,39 @@ import Testing
 import Foundation
 import Darwin
 import GreenBubblesAcquire
-@testable import WXKeytool
+import CryptoKit
+import Security
+@testable import NoteBridgeAccess
 
 @Suite struct KeytoolTests {
+    @Test func missingLocalDataIsDistinguishedFromPrivacyDenial() {
+        #expect(databaseAccessHint(ENOENT).contains("正常登录"))
+        #expect(!databaseAccessHint(ENOENT).contains("完整磁盘"))
+        #expect(databaseAccessHint(EPERM).contains("完整磁盘"))
+        #expect(databaseAccessHint(EACCES).contains("重新连接"))
+        #expect(databaseAccessHint(EIO).contains("系统错误"))
+    }
+    @Test func legacyCredentialReferenceKeepsTheSameAccountAcrossNamespaces() throws {
+        let id = UUID().uuidString.lowercased()
+        let current = try keyQuery(id)
+        let old = try keyQuery(id, legacy: true)
+        #expect(current[kSecAttrAccount] as? String == old[kSecAttrAccount] as? String)
+        #expect(current[kSecAttrService] as? String == "io.github.calwade.notebridge.account-key.v1")
+        #expect(old[kSecAttrService] as? String == "io.github.calwade.wx-watcher.account-key.v1")
+        #expect(try keyQuery(id, serviceSecret: true, legacy: true)[kSecAttrService] as? String == "io.github.calwade.wx-watcher.account-key.v1.app-secret")
+    }
+    @Test func legacyEncryptedBackupCanBeOpenedAndFormatTamperingIsRejected() throws {
+        let salt = Data(repeating: 0x24, count: 16)
+        let bytes = Data(repeating: 0x51, count: 32)
+        let password = "synthetic-legacy-backup-password"
+        let key = try derive(password, salt: salt)
+        let sealed = try AES.GCM.seal(bytes, using: key, authenticating: Data("wx-keytool-backup-v1".utf8))
+        var backup: [String: Any] = ["format": "wx-keytool-backup-v1", "kdf": "PBKDF2-SHA512", "rounds": 256000,
+                                      "salt": salt.base64EncodedString(), "sealed": sealed.combined!.base64EncodedString()]
+        #expect(try openBackup(backup, password: password) == bytes)
+        backup["format"] = "notebridge-backup-v1"
+        #expect(throws: (any Error).self) { try openBackup(backup, password: password) }
+    }
     @Test func clientShutdownIncludesBundleHelpersAndExcludesOtherApps() {
         let listing = """
         12 501 /Applications/WeChat.app/Contents/MacOS/WeChat

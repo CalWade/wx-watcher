@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.0
+
+- Put first-time WeChat connection on the home page, with explicit prerequisite checks, login timing and a verified-completion handoff.
+- Distinguish missing local data from privacy denial; check real debugger binaries without launching the system installer shim.
+- Add a fresh-machine guide with synthetic UI previews and automated first-run tests.
+
+- Product, app bundles, executables, login registration and DSH bridge use NoteBridge; GitHub repository remains wx-watcher.
+- Migrate closed application state and bridge storage while preserving account references, cursors, task records and cost-meter history.
+- Read legacy Keychain entries and encrypted backups; copy approved credentials into the new namespace without recapturing keys.
+- Journal interrupted migrations, retain compatibility links and stop on data conflicts or unfinished client recovery.
+
+
 ## 0.2.0
 
 - Mac launcher/menu bar and authenticated local setup console.

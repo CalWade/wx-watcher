@@ -112,7 +112,7 @@ test("bridge authenticates, denies tools, deduplicates and recovers interrupted 
     await apply(context, { port });
     const token = (
       await fs.readFile(
-        path.join(directory, "storages/wx-reply-agent/token"),
+        path.join(directory, "storages/notebridge/token"),
         "utf8",
       )
     ).trim();
@@ -149,7 +149,7 @@ test("bridge authenticates, denies tools, deduplicates and recovers interrupted 
     assert.equal(calls, 1);
     await cleanup();
     cleanup = null;
-    const jobs = path.join(directory, "storages/wx-reply-agent/jobs");
+    const jobs = path.join(directory, "storages/notebridge/jobs");
     const interrupted = {
       id: "b".repeat(64),
       status: "running",

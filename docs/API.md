@@ -21,8 +21,8 @@ GET /v1/status 中的 event_cursor 是当前持久化序号，即使过期事件
 源码调试：
 
 ```sh
-uv run wx-watcher --config config/local.toml doctor
-uv run wx-watcher --config config/local.toml serve
+uv run notebridge --config config/local.toml doctor
+uv run notebridge --config config/local.toml serve
 uv run python scripts/client.py --config config/local.toml status
 ```
 
@@ -30,7 +30,7 @@ uv run python scripts/client.py --config config/local.toml status
 
 ## 凭据复用
 
-新读取配置可用 `key_ref` 替代文件密钥，并通过 `WX_KEYTOOL_BIN` 或 `keytool` 指定原生访问器。
+新读取配置可用 `key_ref` 替代文件密钥，并通过 `NOTE_BRIDGE_ACCESS_BIN` 或 `keytool` 指定原生访问器。
 主密钥只通过私有进程管道进入本机解密组件，不进入 HTTP。
 默认建议复用只读消息 API；必须自行解密的可信本地组件才需要内部密钥读取能力。
 

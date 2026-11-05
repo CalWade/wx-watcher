@@ -72,6 +72,26 @@ class DesktopSecurityTests(unittest.TestCase):
         self.assertEqual(code, 200)
         self.assertIn("HttpOnly", headers["Set-Cookie"])
         self.assertIn("SameSite=Strict", headers["Set-Cookie"])
+        self.assertIn("notebridge_session=", headers["Set-Cookie"])
+
+    def test_branded_header_and_cookie_are_accepted(self):
+        request = Request(
+            self.base + "/api/auth",
+            data=json.dumps({"token": "test-session-token"}).encode(),
+            headers={
+                "Content-Type": "application/json",
+                "X-NoteBridge-UI": "1",
+                "Origin": self.base,
+            },
+        )
+        with urlopen(request) as response:
+            self.assertEqual(response.status, 200)
+        request = Request(
+            self.base + "/api/settings",
+            headers={"Cookie": "notebridge_session=test-session-token"},
+        )
+        with urlopen(request) as response:
+            self.assertEqual(response.status, 200)
 
     def test_no_raw_secret_or_arbitrary_command_endpoint(self):
         for endpoint in ["read", "keychain-read", "execute", "sql"]:
@@ -146,7 +166,7 @@ class CredentialDiagnosticTests(unittest.TestCase):
         with (
             patch(
                 "wx_watcher.credentials.native_tool",
-                return_value=Path("/example/wx-keytool"),
+                return_value=Path("/example/notebridge-access"),
             ),
             patch(
                 "wx_watcher.credentials.subprocess.run",

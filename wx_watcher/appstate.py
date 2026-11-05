@@ -10,17 +10,8 @@ import threading
 import uuid
 from pathlib import Path
 
+from .branding import app_home, dsh_storage
 from .source import private_dir
-
-
-def app_home() -> Path:
-    return (
-        Path(
-            os.environ.get("WX_WATCHER_HOME", "~/Library/Application Support/WXWatcher")
-        )
-        .expanduser()
-        .resolve()
-    )
 
 
 def atomic_json(path: Path, value):
@@ -168,10 +159,7 @@ class AppState:
             {
                 "reader_config": str(reader),
                 "state_dir": str(scope / "agent"),
-                "dsh_token_file": str(
-                    Path(os.environ.get("DSH_HOME", str(Path.home() / ".dsh")))
-                    / "storages/wx-reply-agent/token"
-                ),
+                "dsh_token_file": str(dsh_storage() / "token"),
                 "dsh_port": state["dsh_port"],
                 "feishu_chat_id": state["feishu_chat_id"],
                 "feishu_chat_name": state["feishu_chat_name"],

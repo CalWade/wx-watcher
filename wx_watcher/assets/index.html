@@ -7,51 +7,70 @@
     <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
-    <aside>
-      <a class="brand" href="#overview"
+    <aside class="sidebar">
+      <a class="brand" href="#overview" aria-label="NoteBridge 工作台"
         ><span class="logo">N</span
-        ><span>NoteBridge<small>本地消息与回复助手</small></span></a
+        ><span>NoteBridge<small>本地消息助手</small></span></a
       >
       <nav aria-label="主导航">
-        <button data-page="overview">概览</button
-        ><button data-page="setup">连接与配置</button
-        ><button data-page="keytool">微信凭据</button
-        ><button data-page="records">回复建议</button
-        ><button data-page="knowledge">业务资料</button
-        ><button data-page="diagnostics">运行诊断</button>
+        <button data-page="overview">
+          <span class="nav-symbol" aria-hidden="true">▦</span>工作台
+        </button>
+        <button data-page="setup">
+          <span class="nav-symbol" aria-hidden="true">⇄</span>接入设置
+        </button>
       </nav>
       <div class="aside-bottom">
-        <span class="status-dot"></span>数据读取在本机进行<small
-          >模型与飞书按你的配置接收内容</small
-        ><a
-          href="https://github.com/CalWade/wx-watcher"
-          target="_blank"
-          rel="noreferrer"
-          >项目与使用文档 ↗</a
-        >
+        <details id="more-menu">
+          <summary>更多<span aria-hidden="true">⌄</span></summary>
+          <nav aria-label="更多功能">
+            <button data-page="knowledge">业务资料与规则</button>
+            <button data-page="keytool">凭据与恢复</button>
+            <button data-page="diagnostics">运行诊断</button>
+          </nav>
+          <a
+            href="https://github.com/CalWade/wx-watcher/blob/main/docs/FIRST_RUN.md"
+            target="_blank"
+            rel="noreferrer"
+            >使用指南 ↗</a
+          >
+        </details>
+        <p class="local-label"><span class="status-dot"></span>微信端只读</p>
       </div>
     </aside>
     <main>
-      <header>
+      <header class="page-header">
         <div>
-          <span class="eyebrow">WORKSPACE / 本机工作区</span>
           <h1 id="title">连接与配置</h1>
+          <p id="subtitle" class="muted">
+            按步骤接入，完成后即可开始处理新消息。
+          </p>
         </div>
         <div id="health" class="pill">正在连接</div>
       </header>
       <div id="notice" role="status" aria-live="polite"></div>
       <div id="content"><p>正在打开本地工作区…</p></div>
-      <footer>NoteBridge 0.3.1 · 微信端只读 · 建议请人工确认后回复客户</footer>
+      <footer>NoteBridge 0.4.0<span>回复建议由你确认后发给客户</span></footer>
     </main>
-    <dialog id="job-dialog">
+    <dialog id="job-dialog" aria-labelledby="job-title">
       <h2 id="job-title">正在处理</h2>
-      <p id="job-progress">请稍候，正在执行本地操作。</p>
+      <p id="job-progress" role="status">请稍候，正在执行本地操作。</p>
       <p id="job-summary"></p>
       <details id="job-details">
         <summary>查看详细结果</summary>
         <pre id="job-result"></pre>
       </details>
-      <button id="job-close" class="primary" disabled>完成</button>
+      <div class="actions dialog-actions">
+        <button id="job-close" class="primary" disabled>完成</button>
+      </div>
+    </dialog>
+    <dialog id="confirm-dialog" aria-labelledby="confirm-title">
+      <h2 id="confirm-title">确认操作</h2>
+      <p id="confirm-message"></p>
+      <div class="actions dialog-actions">
+        <button id="confirm-no">取消</button
+        ><button id="confirm-yes" class="primary">继续</button>
+      </div>
     </dialog>
     <script src="/app.js" defer></script>
   </body>

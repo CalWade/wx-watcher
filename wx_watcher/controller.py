@@ -276,6 +276,7 @@ class Controller:
             "task-review",
             "reset-cursor",
             "auto-connect",
+            "connect-dsh",
             "finish-setup",
             "run-settings",
         }:
@@ -284,6 +285,29 @@ class Controller:
         return self._perform(operation, data)
 
     def _perform(self, operation, data):
+        if operation == "connect-dsh":
+            if self.services.running():
+                raise ValueError("请先在工作台暂停监控，再连接或更新模型")
+            from .onboarding import prepare_dsh
+
+            cost = prepare_dsh(self.state)
+            bridge = self.install_dsh()
+            ready = bool(bridge.get("ready"))
+            return {
+                "ready": ready,
+                "cost_meter": cost,
+                "checks": [
+                    {"stage": "费用插件", "ok": bool(cost.get("installed"))},
+                    {
+                        "stage": "DSH 模型连接",
+                        "ok": ready,
+                        "message": bridge.get("hint", ""),
+                    },
+                ],
+                "message": "DSH 与费用插件已连接"
+                if ready
+                else bridge.get("hint", "请在 DSH 完成模型配置"),
+            }
         if operation == "auto-connect":
             if self.services.running():
                 raise ValueError("请先暂停监控，再检查或更新连接")
@@ -489,6 +513,14 @@ class Controller:
                         send_enabled=False,
                         autostart_monitor=False,
                     )
+            previous = self.state.load()
+            if any(
+                k in values and values[k] != previous[k]
+                for k in ["feishu_transport", "feishu_app_id"]
+            ):
+                values.update(
+                    feishu_chat_id="", feishu_chat_name="", send_enabled=False
+                )
             self.state.update(**values)
             if switching:
                 if self.preview_reader is not None:
@@ -507,7 +539,19 @@ class Controller:
             answer = native_request(
                 {"operation": "store_secret", "secret": data["secret"]}
             )
+            previous = self.state.load()
+            destination = {}
+            if (
+                previous["feishu_app_id"] != data["app_id"]
+                or previous["feishu_transport"] != "openapi"
+            ):
+                destination = {
+                    "feishu_chat_id": "",
+                    "feishu_chat_name": "",
+                    "send_enabled": False,
+                }
             self.state.update(
+                **destination,
                 feishu_app_id=data["app_id"],
                 feishu_secret_ref=answer["key_ref"],
                 feishu_transport="openapi",
@@ -663,7 +707,7 @@ class Controller:
         if operation == "diagnostics":
             s = self.state.load()
             return {
-                "version": "0.3.1",
+                "version": "0.4.0",
                 "environment": self.doctor(),
                 "services": self.services.status(),
                 "profile_count": len(s["profiles"]),

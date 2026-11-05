@@ -75,6 +75,11 @@ class FixtureController(Controller):
         ]
 
     def perform(self, operation, data):
+        if operation == "connect-dsh":
+            return {
+                "ready": True,
+                "checks": [{"stage": "合成模型与费用连接", "ok": True}],
+            }
         if operation == "auto-connect":
             return {
                 "checks": [{"stage": "合成连接检查", "ok": True}],

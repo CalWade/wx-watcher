@@ -97,7 +97,7 @@ def create_desktop(controller: Controller, token: str, port=0):
                     return self.send(
                         200,
                         {
-                            "version": "0.3.1",
+                            "version": "0.4.0",
                             "services": controller.services.status(),
                             "records": controller.records(),
                             "jobs": list(controller.jobs.values())[-20:],
@@ -171,6 +171,7 @@ def create_desktop(controller: Controller, token: str, port=0):
                 "reset-cursor",
                 "login-service",
                 "auto-connect",
+                "connect-dsh",
                 "finish-setup",
                 "run-settings",
             }

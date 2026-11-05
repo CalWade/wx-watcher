@@ -37,6 +37,33 @@ class OnboardingTests(unittest.TestCase):
         self.assertEqual(result["version"], "synthetic-existing")
         run.assert_not_called()
 
+    def test_model_step_does_not_inspect_wechat_or_feishu_or_call_a_model(self):
+        self.c.services.running = Mock(return_value=False)
+        self.c.accounts = Mock(side_effect=AssertionError("unrelated account step"))
+        self.c.feishu = Mock(side_effect=AssertionError("unrelated destination step"))
+        self.c.install_dsh = Mock(return_value={"ready": True})
+        with patch(
+            "wx_watcher.onboarding.prepare_dsh", return_value={"installed": True}
+        ):
+            result = self.c.perform("connect-dsh", {})
+        self.assertTrue(result["ready"])
+        self.assertTrue(all(c["ok"] for c in result["checks"]))
+        self.c.accounts.assert_not_called()
+        self.c.feishu.assert_not_called()
+
+    def test_changed_feishu_transport_cannot_keep_the_old_destination(self):
+        self.c.services.running = Mock(return_value=False)
+        self.c.state.update(
+            feishu_transport="cli",
+            feishu_chat_id="old-group",
+            feishu_chat_name="old",
+            send_enabled=True,
+        )
+        self.c.perform("settings", {"feishu_transport": "openapi"})
+        saved = self.c.state.load()
+        self.assertEqual(saved["feishu_chat_id"], "")
+        self.assertFalse(saved["send_enabled"])
+
     def test_denied_wechat_access_does_not_block_independent_connections(self):
         self.c.accounts = Mock(side_effect=PermissionError("缺少微信读取权限"))
         self.c.feishu = Mock()

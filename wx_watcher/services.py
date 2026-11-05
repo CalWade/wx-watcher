@@ -22,8 +22,9 @@ def command(*args):
 
 
 class Services:
-    def __init__(self, state: AppState):
+    def __init__(self, state: AppState, account_guard=None):
         self.state = state
+        self.account_guard = account_guard
         self.children: dict[str, subprocess.Popen] = {}
         self.lock = threading.RLock()
         self.started_at = None
@@ -52,6 +53,8 @@ class Services:
                 raise
 
     def _start(self):
+        if self.account_guard:
+            self.account_guard()
         requested = self.state.load()["reader_port"]
         with socket.socket() as reservation:
             try:
@@ -199,6 +202,13 @@ class Services:
 
     def _watch_once(self):
         with self.lock:
+            if self.expected_running and self.account_guard:
+                try:
+                    self.account_guard()
+                except (OSError, RuntimeError, ValueError) as exc:
+                    self.stop()
+                    self.last_error = "监控已暂停：" + str(exc)
+                    return
             for name in ("reader", "worker"):
                 log = self.state.home / (name + ".log")
                 if log.exists() and log.stat().st_size > 2_000_000:

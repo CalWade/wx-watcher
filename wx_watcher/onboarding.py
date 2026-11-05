@@ -225,11 +225,29 @@ def connect_existing(controller):
             return None
 
     result["accounts"] = step("识别微信账号", controller.accounts) or []
-    if controller.state.load()["profiles"]:
-        result["credential"] = step(
-            "复用并验证凭据", lambda: controller.perform("verify-key", {})
-        )
-        if result["credential"]:
+    current = [a for a in result["accounts"] if a.get("active")]
+    profile = next(
+        (
+            p
+            for p in controller.state.load()["profiles"]
+            if len(current) == 1
+            and Path(p["db_root"]).resolve() == Path(current[0]["db_root"]).resolve()
+        ),
+        None,
+    )
+    if profile:
+        if profile["id"] != controller.state.load()["active_profile"]:
+            step(
+                "切换当前登录账号",
+                lambda: controller.perform(
+                    "settings", {"active_profile": profile["id"]}
+                ),
+            )
+        if controller.state.load()["active_profile"] == profile["id"]:
+            result["credential"] = step(
+                "复用并验证凭据", lambda: controller.perform("verify-key", {})
+            )
+        if result.get("credential"):
             result["conversations"] = (
                 step("读取会话列表", controller.conversations) or []
             )
@@ -238,7 +256,7 @@ def connect_existing(controller):
             {
                 "stage": "连接微信凭据",
                 "ok": False,
-                "message": "先导入已有密钥，或使用首次取钥向导",
+                "message": "当前登录账号没有可复用的凭据，或尚未确认登录账号。请在账号区域连接当前账号，不会改用其他历史账号。",
             }
         )
     result["cost_meter"] = step(

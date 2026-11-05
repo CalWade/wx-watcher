@@ -3,7 +3,7 @@
 import os
 from pathlib import Path
 
-VERSION = "0.3.0"
+VERSION = "0.3.1"
 APP_NAME = "NoteBridge"
 BUNDLE_ID = "io.github.calwade.notebridge"
 LEGACY_BUNDLE_ID = "io.github.calwade.wx-watcher"

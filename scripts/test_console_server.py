@@ -69,6 +69,11 @@ class FixtureController(Controller):
             }
         ]
 
+    def accounts(self):
+        return [
+            {"label": "合成当前账号", "db_root": "/example/db_storage", "active": True}
+        ]
+
     def perform(self, operation, data):
         if operation == "auto-connect":
             return {

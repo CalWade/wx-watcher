@@ -7,7 +7,7 @@
 ## 1. 确认适用范围
 
 目前面向 Apple Silicon Mac。原生界面的源码目标是 macOS 14；实际应用最低版本取所有打包依赖的最大值。
-本机发布的 0.3.0 安装包因 SQLCipher/OpenSSL 依赖要求 **macOS 27.0+**，
+本机发布的 0.3.1 安装包因 SQLCipher/OpenSSL 依赖要求 **macOS 27.0+**，
 安装包 Info.plist 与 build-manifest.json 会如实记录。真实整合组合在 README 中列出。
 首次取钥只放行已验证的微信构建；数据库读取、应用能启动和取钥成功是不同的验收项。
 请只连接本人账号或有明确处理权限的数据。
@@ -15,7 +15,7 @@
 ## 2. 使用 Mac 应用
 
 从仓库 Releases 下载与你芯片对应的构建，核对发布页 SHA-256。
-将 `NoteBridge.app` 拖入「应用程序」后打开；独立凭据用途可打开 `NoteBridge Setup.app`。
+将 `NoteBridge.app` 拖入「应用程序」后打开；独立凭据用途可从发布页另外下载 Setup ZIP。DMG 只放主应用。
 两个入口使用同一个本机凭据与账号配置，不需要复制密钥。
 
 请检查发布页的签名状态。Developer ID 签名与公证需要维护者配置凭据；临时签名构建

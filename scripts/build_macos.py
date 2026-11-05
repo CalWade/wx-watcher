@@ -15,8 +15,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 BUILD = ROOT / "build/macos"
-DIST = ROOT / "dist"
-VERSION = "0.3.0"
+DIST = (
+    Path(os.environ.get("NOTE_BRIDGE_DIST_DIR", str(ROOT / "dist")))
+    .expanduser()
+    .resolve()
+)
+VERSION = "0.3.1"
 
 
 def run(args, **kwargs):
@@ -59,7 +63,7 @@ def main():
     if not sql:
         raise SystemExit("Install SQLCipher before building")
     BUILD.mkdir(parents=True, exist_ok=True)
-    DIST.mkdir(exist_ok=True)
+    DIST.mkdir(parents=True, exist_ok=True)
     run(
         [
             "swift",
@@ -114,6 +118,14 @@ def main():
         executable_name = "NoteBridgeSetup" if keytool else "NoteBridge"
         app = DIST / (name + ".app")
         if app.exists():
+            processes = subprocess.check_output(["/bin/ps", "-axo", "comm="], text=True)
+            if any(
+                line.strip().startswith(str(app) + "/")
+                for line in processes.splitlines()
+            ):
+                raise SystemExit(
+                    "目标应用正在运行。请退出它，或用 NOTE_BRIDGE_DIST_DIR 指定独立构建目录。"
+                )
             shutil.rmtree(app)
         contents = app / "Contents"
         mac = contents / "MacOS"
@@ -215,9 +227,12 @@ def main():
         archive = DIST / (name.replace(" ", "-") + "-" + VERSION + "-arm64.zip")
         run(["/usr/bin/ditto", "-c", "-k", "--keepParent", app, archive])
         artifacts.append(archive)
-    stage = BUILD / ("dmg-" + VERSION)
+        if keytool:
+            # The optional standalone tool remains downloadable as a ZIP.
+            shutil.rmtree(app)
+    stage = BUILD / ("dmg-" + VERSION + ".noindex")
     stage.mkdir(exist_ok=True)
-    for name in ["NoteBridge.app", "NoteBridge Setup.app"]:
+    for name in ["NoteBridge.app"]:
         target = stage / name
         if target.exists():
             shutil.rmtree(target)
@@ -243,6 +258,8 @@ def main():
         ]
     )
     artifacts.append(dmg)
+    # Do not leave a second pair of apps in macOS application search after packaging.
+    shutil.rmtree(stage)
     (DIST / "SHA256SUMS").write_text(
         "".join(
             hashlib.sha256(p.read_bytes()).hexdigest() + "  " + p.name + "\n"

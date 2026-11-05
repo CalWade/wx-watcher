@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.1
+
+- Always show the current WeChat login, selected project account and saved-credential status separately.
+- Connect an unsaved current account directly to its own acquisition target; verify saved keys before selecting an account.
+- Block mismatched/unconfirmed accounts before conversation reads, monitoring or full-chain tests; pause supervised services when account identity changes.
+- Prevent auto-connect from silently reusing another account's credentials; reset conversation and automatic delivery options when changing accounts.
+- Preserve old credentials and records, show saved accounts even when data access is denied, and keep the optional Setup in its separate ZIP.
+- Leave only the main app in the DMG/output and remove temporary staging copies; support isolated build output and reject overwriting a running app.
+
 ## 0.3.0
 
 - Put first-time WeChat connection on the home page, with explicit prerequisite checks, login timing and a verified-completion handoff.

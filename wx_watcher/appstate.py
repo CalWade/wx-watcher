@@ -112,6 +112,8 @@ class AppState:
                 active_profile=profile["id"],
                 chat_id="",
                 group_name="",
+                send_enabled=False,
+                autostart_monitor=False,
             )
 
     def write_configs(self) -> tuple[Path, Path]:

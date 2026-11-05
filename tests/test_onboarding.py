@@ -15,6 +15,7 @@ class OnboardingTests(unittest.TestCase):
         self.directory = Path(self.temp.name)
         self.c = Controller(self.directory / "app")
         self.c.services.shutdown_event.set()
+        self.c.require_current_account = Mock()
 
     def tearDown(self):
         self.c.pool.shutdown(wait=True)

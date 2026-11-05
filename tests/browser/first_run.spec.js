@@ -22,6 +22,36 @@ test.beforeEach(async ({ page }) => {
       json: { ...settings, profiles: [], active_profile: "" },
     });
   });
+  await page.route("**/api/action/account-status", (route) =>
+    route.fulfill({ status: 202, json: { job_id: "fresh-account" } }),
+  );
+  await page.route("**/api/job?id=fresh-account", (route) =>
+    route.fulfill({
+      json: {
+        status: "completed",
+        result: {
+          code: "needs_credentials",
+          message: "当前账号尚未保存密钥",
+          matches_current: false,
+          selected: null,
+          current: {
+            label: "合成当前账号",
+            db_root: "/example/db_storage",
+            active: true,
+            credential_saved: false,
+          },
+          accounts: [
+            {
+              label: "合成当前账号",
+              db_root: "/example/db_storage",
+              active: true,
+              credential_saved: false,
+            },
+          ],
+        },
+      },
+    }),
+  );
   await page.goto("/#token=browser-fixture-token&page=setup");
 });
 
@@ -108,6 +138,8 @@ test("first-run login gate leads to verified completion and session setup", asyn
   );
   await expect(page.locator("#capture-progress")).toContainText("监听已就绪");
   await page.unroute("**/api/settings");
+  await page.unroute("**/api/action/account-status");
+  await page.unroute("**/api/job?id=fresh-account");
   await page.route("**/api/action/capture-status", (route) =>
     route.fulfill({
       status: 202,

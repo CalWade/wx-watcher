@@ -50,7 +50,7 @@
       </header>
       <div id="notice" role="status" aria-live="polite"></div>
       <div id="content"><p>正在打开本地工作区…</p></div>
-      <footer>NoteBridge 0.4.3<span>回复建议由你确认后发给客户</span></footer>
+      <footer>NoteBridge 0.4.4<span>回复建议由你确认后发给客户</span></footer>
     </main>
     <dialog id="job-dialog" aria-labelledby="job-title">
       <h2 id="job-title">正在处理</h2>
@@ -62,6 +62,31 @@
       </details>
       <div class="actions dialog-actions">
         <button id="job-close" class="primary" disabled>完成</button>
+      </div>
+    </dialog>
+    <dialog id="account-name-dialog" aria-labelledby="account-name-title">
+      <h2 id="account-name-title">账号显示名称</h2>
+      <p class="muted">
+        本地备注只影响 NoteBridge。微信昵称和微信号请在微信中修改。
+      </p>
+      <p id="account-name-identity" class="note"></p>
+      <label
+        >本地备注<input
+          id="account-name-input"
+          maxlength="80"
+          autocomplete="off"
+          placeholder="例如：工作号、客户服务号（可留空）"
+      /></label>
+      <p id="account-name-error" role="alert"></p>
+      <details class="subsection">
+        <summary>账号标识</summary>
+        <p id="account-name-id" class="muted"></p>
+      </details>
+      <div class="actions dialog-actions">
+        <button id="account-name-refresh" class="text-button">
+          读取微信昵称与微信号</button
+        ><button id="account-name-cancel">取消</button
+        ><button id="account-name-save" class="primary">保存名称</button>
       </div>
     </dialog>
     <dialog id="confirm-dialog" aria-labelledby="confirm-title">

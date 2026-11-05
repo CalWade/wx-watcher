@@ -52,3 +52,5 @@ Bearer 认证，默认 8766：
 使用受保护的启动链接完成一次会话交换，随后使用 HttpOnly / SameSite cookie。
 修改请求检查 Host、Origin、JSON 类型和自定义请求头；外部网页不能直接配置服务。
 原生文件选择消息仅接受当前主框架的受信任本机来源。
+
+账号名称的内部管理操作：`POST /api/action/account-name` 接收 `{db_root, label}`，只更新已发现或已保存账号的本地备注；空 `label` 清除备注。`POST /api/action/refresh-account-name` 接收 `{db_root}`，读取已保存凭据所对应的本人昵称与微信号。两者均按数据库目录定位，不用昵称或备注作为账号身份。显示元数据缓存于私有设置文件；账号列表只读缓存，不触发钥匙串读取。

@@ -7,7 +7,7 @@
 ## 1. 确认适用范围
 
 目前面向 Apple Silicon Mac。原生界面的源码目标是 macOS 14；实际应用最低版本取所有打包依赖的最大值。
-本机发布的 0.4.3 安装包因 SQLCipher/OpenSSL 依赖要求 **macOS 27.0+**，
+本机发布的 0.4.4 安装包因 SQLCipher/OpenSSL 依赖要求 **macOS 27.0+**，
 安装包 Info.plist 与 build-manifest.json 会如实记录。真实整合组合在 README 中列出。
 首次取钥只放行已验证的微信构建；数据库读取、应用能启动和取钥成功是不同的验收项。
 请只连接本人账号或有明确处理权限的数据。

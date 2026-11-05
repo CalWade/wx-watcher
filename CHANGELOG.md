@@ -1,8 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.4.4
 
-- Strip upstream debug source paths from bundled Python extensions before signing. This fixes the macOS CI packaging check for zstandard wheels without weakening credential/path scanning or changing the installed 0.4.3 application.
+- Show local account remarks or the verified self contact's nickname and WeChat ID instead of database directory names. Keep the internal identifier in account details and use a suffix when no name is available.
+- Edit account names directly from the account list and capture target, including before key capture; clearing a remark restores automatic naming. Preserve remarks across capture and do not change account identity, credentials, monitored chat or delivery settings.
+- Cache self-contact metadata after connection or verification and offer an explicit refresh. Listing or renaming accounts never reads Keychain. Missing or ambiguous self contacts do not get replaced with another contact's name.
+- Add display and identity-binding regressions, update the first-run guide and keep metadata local.
+- Strip upstream debug source paths from bundled Python extensions before signing. This fixes the macOS CI packaging check for zstandard wheels without weakening credential/path scanning or relaxing path checks.
 
 ## 0.4.3
 

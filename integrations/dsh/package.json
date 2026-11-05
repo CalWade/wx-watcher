@@ -1,6 +1,6 @@
 {
   "name": "dsh-notebridge",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "type": "module",
   "main": "index.mjs",
   "description": "Local reply-only DSH bridge for notebridge; reuses the desktop LLM and cost-meter services"

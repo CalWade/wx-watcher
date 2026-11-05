@@ -1,6 +1,6 @@
 [project]
 name = "notebridge"
-version = "0.4.3"
+version = "0.4.4"
 description = "Local-first WeChat reader, macOS key tool and DSH-to-Feishu reply assistant"
 readme = "README.md"
 license = "MIT"

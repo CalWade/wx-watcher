@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.0
+
+- Reduce primary navigation to Workbench and Setup; move knowledge, credential maintenance and diagnostics into More.
+- Guide setup through five focused steps with one visible form; keep first-time capture separate from everyday monitoring.
+- Replace the dense green dashboard with consistent neutral surfaces, spacing, responsive forms and explicit action hierarchy.
+- Preserve expanded account details and focused inputs during background refresh; wait for refreshed state before completing saves.
+- Resume capture progress when returning to its page, restore retry controls after cancellation, and prevent concurrent credential import.
+- Use in-page confirmation dialogs in both browser and native WebView, and show empty search results directly in the active step.
+- Connect DSH and cost-meter without modifying unrelated WeChat or Feishu settings. Show custom Feishu credentials immediately after transport selection.
+- Clear the old Feishu destination and automatic delivery when switching transport or application identity.
+- Wrap the native permission helper at narrow window sizes and set a minimum usable native window size.
+
 ## 0.3.1
 
 - Always show the current WeChat login, selected project account and saved-credential status separately.

@@ -1,9 +1,9 @@
 "use strict";
 const $ = (s) => document.querySelector(s);
 const labels = {
-  overview: "运行概览",
+  overview: "工作台",
   setup: "连接与配置",
-  keytool: "微信凭据",
+  keytool: "连接微信",
   records: "回复建议",
   knowledge: "业务资料",
   diagnostics: "运行诊断",
@@ -17,6 +17,14 @@ let captureReadiness = null;
 let captureProgress = null;
 let accountReport = null;
 let pendingAccount = null;
+let setupStep = null;
+let setupDraft = {};
+let activeCaptureId = null;
+let activeOperation = false;
+let refreshPending = null;
+let lastPassiveView = "";
+let noticeTimer;
+let requestRecapture = false;
 const escape = (value) =>
   String(value ?? "").replace(
     /[&<>"']/g,
@@ -34,6 +42,14 @@ const card = (title, body) =>
 function notice(message, error = false) {
   $("#notice").className = error ? "error" : "success";
   $("#notice").textContent = message;
+  clearTimeout(noticeTimer);
+  if (!error)
+    noticeTimer = setTimeout(() => {
+      if ($("#notice").textContent === message) {
+        $("#notice").textContent = "";
+        $("#notice").className = "";
+      }
+    }, 6000);
 }
 async function api(route, data) {
   const response = await fetch("/api/" + route, {
@@ -48,44 +64,80 @@ async function api(route, data) {
   if (!response.ok) throw new Error(value.error || "请求失败");
   return value;
 }
+function confirmAction(message) {
+  const dialog = $("#confirm-dialog");
+  if (dialog.open) return Promise.resolve(false);
+  $("#confirm-message").textContent = message;
+  return new Promise((resolve) => {
+    let finished = false;
+    const finish = (value) => {
+      if (finished) return;
+      finished = true;
+      dialog.close();
+      dialog.removeEventListener("cancel", cancel);
+      resolve(value);
+    };
+    const cancel = (e) => {
+      e.preventDefault();
+      finish(false);
+    };
+    $("#confirm-no").onclick = () => finish(false);
+    $("#confirm-yes").onclick = () => finish(true);
+    dialog.addEventListener("cancel", cancel);
+    dialog.showModal();
+    $("#confirm-no").focus();
+  });
+}
 async function action(op, data = {}, title = "正在处理") {
+  if (activeOperation) throw new Error("上一步还在处理，请稍候。");
+  activeOperation = true;
   const dialog = $("#job-dialog");
   $("#job-title").textContent = title;
   $("#job-result").textContent = "";
   $("#job-details").open = false;
   $("#job-summary").textContent = "";
-  $("#job-progress").textContent = "正在执行，请稍候。";
+  $("#job-progress").textContent = "正在处理，请稍候…";
   $("#job-close").disabled = true;
   if (!dialog.open) dialog.showModal();
   try {
-    const { job_id } = await api("action/" + op, data);
-    let job;
-    do {
-      await new Promise((r) => setTimeout(r, 350));
-      job = await api("job?id=" + job_id);
-    } while (job.status === "running");
-    if (job.status !== "completed") throw new Error(job.error || "操作未完成");
+    const result = await quietAction(op, data);
+    await refresh();
+    activeOperation = false;
     $("#job-progress").textContent = "已完成";
-    $("#job-summary").textContent = describeResult(op, job.result);
-    $("#job-result").textContent = JSON.stringify(job.result, null, 2);
-    return job.result;
+    $("#job-summary").textContent = describeResult(op, result);
+    $("#job-result").textContent = JSON.stringify(result, null, 2);
+    // Ordinary saves/searches return to the task without an extra acknowledgement.
+    if (!["doctor", "test-dsh", "test-feishu"].includes(op)) dialog.close();
+    if (
+      !["connection-check", "capture-start", "capture-login-ready"].includes(op)
+    )
+      notice(describeResult(op, result));
+    return result;
   } catch (error) {
-    $("#job-progress").textContent = "需要处理";
-    $("#job-summary").textContent = error.message;
+    dialog.close();
+    notice(error.message, true);
     throw error;
   } finally {
     $("#job-close").disabled = false;
-    await refresh();
+    activeOperation = false;
   }
 }
 function describeResult(op, value) {
   if (op === "doctor" && value.wechat_data_access?.readable === false)
     return value.wechat_data_access.hint;
   if (value.message || value.hint) return value.message || value.hint;
+  if (op === "connect-dsh")
+    return value.ready
+      ? "DSH 与费用插件已连接，可以继续下一步。"
+      : value.message;
   if (op === "auto-connect")
     return value.checks.every((c) => c.ok)
-      ? "本机连接已就绪。请选择微信会话和飞书接收群，再测试全链路。"
-      : "已自动完成可用的连接，请关闭此窗口处理页面中标出的事项。";
+      ? "本机连接已就绪，可以继续下一步。"
+      : "已完成可用的连接，请处理页面中标出的事项。";
+  if (op === "connection-check")
+    return value.ready
+      ? "检查已通过，可以开始连接。"
+      : "还有条件未满足，请处理下方提示后重新检查。";
   if (op === "capture-preflight")
     return value.ready
       ? "环境检查通过。开始后请停在微信登录页，等待监听明确就绪再点击登录。"
@@ -105,7 +157,7 @@ function describeResult(op, value) {
   if (op === "backup-key")
     return "加密备份已生成，请保存下载文件并单独保管口令。";
   if (Array.isArray(value))
-    return `已找到 ${value.length} 项，关闭此窗口后选择。`;
+    return `已找到 ${value.length} 项，请在列表中选择。`;
   if (op === "feishu-chats")
     return `已找到 ${value.data?.chats?.length || 0} 个机器人可访问的群。`;
   if (op === "login-service")
@@ -115,7 +167,7 @@ function describeResult(op, value) {
   if (value.running === true) return "读取与回复服务已启动。";
   if (value.running === false) return "本应用启动的服务已停止。";
   if (value.saved) return "设置已保存。";
-  return "操作已完成，可以展开查看详细结果。";
+  return "操作已完成。";
 }
 async function quietAction(op, data = {}) {
   const { job_id } = await api("action/" + op, data);
@@ -129,12 +181,20 @@ async function quietAction(op, data = {}) {
 }
 function bind(id, fn) {
   const element = $("#" + id);
-  if (element)
-    element.addEventListener("click", () =>
-      Promise.resolve()
-        .then(fn)
-        .catch((e) => notice(e.message, true)),
-    );
+  if (!element) return;
+  element.addEventListener("click", async () => {
+    if (element.dataset.busy) return;
+    element.dataset.busy = "true";
+    element.setAttribute("aria-busy", "true");
+    try {
+      await fn();
+    } catch (e) {
+      notice(e.message, true);
+    } finally {
+      delete element.dataset.busy;
+      element.removeAttribute("aria-busy");
+    }
+  });
 }
 function openPrivacy() {
   if (window.webkit?.messageHandlers?.native)
@@ -168,13 +228,33 @@ function nativePick(kind) {
   });
 }
 async function refresh() {
-  settings = await api("settings");
-  state = await api("status");
+  if (refreshPending) return refreshPending;
+  refreshPending = refreshState();
+  try {
+    await refreshPending;
+  } finally {
+    refreshPending = null;
+  }
+}
+async function refreshState() {
+  const fresh = await Promise.all([api("settings"), api("status")]);
+  [settings, state] = fresh;
   try {
     const previous = accountReport?.current?.db_root;
     accountReport = await quietAction("account-status");
-    if (previous !== accountReport.current?.db_root) captureReadiness = null;
+    if (previous !== accountReport.current?.db_root) {
+      captureReadiness = null;
+      if (previous && !activeCaptureId) {
+        pendingAccount = null;
+        captureProgress = null;
+        setupDraft = {};
+        connectionReport = null;
+        setupStep = 1;
+        if (page === "setup" || page === "keytool") render();
+      }
+    }
   } catch (error) {
+    captureReadiness = null;
     accountReport = {
       code: "unavailable",
       message: error.message,
@@ -193,13 +273,14 @@ async function refresh() {
     ? "● 需要处理"
     : running
       ? "● 正在监控"
-      : "○ 尚未监控";
+      : "○ 未运行";
   $("#health").className = "pill " + (problem ? "warn" : running ? "ok" : "");
 }
-function accountPanelHTML() {
+function accountPanelHTML(framed = true) {
   const r = accountReport;
   const rows = r?.accounts || [];
-  return `<section id="account-panel" class="card"><h2>微信账号</h2><div class="row"><span>微信当前登录</span><strong id="wechat-current-account">${escape(r?.current?.label || "尚未确认，请登录微信后刷新")}</strong></div><div class="row"><span>本项目正在使用</span><strong id="project-selected-account">${escape(r?.selected?.label || "尚未连接账号")}</strong></div><p id="account-message" class="${r?.matches_current ? "success" : "note"}">${escape(r?.message || "正在识别账号…")}</p><div class="actions"><button id="refresh-accounts">刷新账号状态</button>${r?.current ? `<button id="use-current-account" class="primary">${r.current.credential_saved ? (r.matches_current ? "验证当前账号凭据" : "验证并切换到当前登录账号") : "连接当前登录账号（尚无密钥）"}</button>` : ""}</div><details id="account-list"><summary>查看本机账号与已保存凭据（${rows.length}）</summary>${rows.map((a, i) => `<div class="row"><div><strong>${escape(a.label)}</strong><p class="muted">${a.active ? "微信当前登录 · " : "历史账号资料 · "}${a.credential_saved ? "密钥已保存" : "尚未连接凭据"}${a.selected ? " · 本项目正在使用" : ""}</p></div><button data-account-index="${i}" ${a.active ? "" : "disabled"}>${a.credential_saved ? "验证并使用" : "连接此账号"}</button></div>`).join("")}<p class="muted">切换微信登录账号后请刷新。新账号需要自己的密钥；历史账号需先在微信正常登录，再切换本项目。不会自动更改微信的登录账号。</p></details></section>`;
+  const hasSaved = settings.profiles?.length > 0;
+  return `<section id="account-panel" ${framed ? 'class="card"' : ""}><h2>微信账号</h2><div class="account-summary"><div><span class="label">微信当前登录</span><strong id="wechat-current-account">${escape(r?.current?.label || "尚未识别，请登录微信后刷新")}</strong></div><div><span class="label">NoteBridge 已连接</span><strong id="project-selected-account">${escape(r?.selected?.label || "尚未连接")}</strong></div></div><p id="account-message" class="${r?.matches_current ? "success" : "note"}">${escape(r?.message || "正在识别账号…")}</p><div class="actions">${!hasSaved && page === "setup" ? '<button id="first-connect" class="primary">首次连接微信</button>' : ""}${r?.current && (hasSaved || page !== "setup") ? `<button id="use-current-account" class="${r.matches_current || page === "keytool" ? "" : "primary"}">${r.current.credential_saved ? (r.matches_current ? "验证当前账号" : "验证并切换到当前账号") : "连接当前账号"}</button>` : ""}<button id="refresh-accounts" class="text-button">刷新账号</button></div><details id="account-list"><summary id="account-toggle">已发现的账号 · ${rows.length}</summary>${rows.map((a, i) => `<div class="row"><div class="grow"><strong>${escape(a.label)}</strong><p class="muted">${a.active ? "微信当前登录 · " : "历史账号资料 · "}${a.credential_saved ? "密钥已保存" : "尚无密钥"}${a.selected ? " · 本项目正在使用" : ""}</p></div><button data-account-index="${i}" ${a.active ? "" : "disabled"}>${a.credential_saved ? "验证并使用" : "连接此账号"}</button></div>`).join("")}<p class="muted">更换账号请先在微信登录，再回来刷新。每个账号分别保存凭据。</p></details></section>`;
 }
 function updateAccountActions() {
   const matches = accountReport?.matches_current === true;
@@ -209,23 +290,49 @@ function updateAccountActions() {
       !matches || !settings.chat_id || !settings.feishu_chat_id;
   document
     .querySelectorAll('[data-op="start"]')
-    .forEach((b) => (b.disabled = !matches));
+    .forEach((b) => (b.disabled = !matches || !settings.chat_id));
+  document
+    .querySelectorAll("[data-step]")
+    .forEach((b) => (b.disabled = Number(b.dataset.step) > 1 && !matches));
+  if ($("#capture-start") && !activeCaptureId)
+    $("#capture-start").disabled = !captureReadiness?.ready;
 }
 function paintAccountPanel() {
-  if (!$("#account-panel")) return;
-  $("#account-panel").outerHTML = accountPanelHTML();
+  const panel = $("#account-panel");
+  if (!panel) {
+    updateAccountActions();
+    return;
+  }
+  const html = accountPanelHTML(panel.classList.contains("card"));
+  // Replacing unchanged markup every five seconds collapsed details and stole focus.
+  if (panel.dataset.report === html) {
+    updateAccountActions();
+    return;
+  }
+  const expanded = $("#account-list")?.open;
+  const focusedId = panel.contains(document.activeElement)
+    ? document.activeElement.id
+    : null;
+  panel.outerHTML = html;
+  $("#account-panel").dataset.report = html;
+  if ($("#account-list")) $("#account-list").open = !!expanded;
   bindAccountPanel();
+  if (focusedId) $("#" + focusedId)?.focus({ preventScroll: true });
   updateAccountActions();
 }
 function bindAccountPanel() {
+  const panel = $("#account-panel");
+  if (panel)
+    panel.dataset.report = accountPanelHTML(panel.classList.contains("card"));
+  bind("first-connect", () => {
+    pendingAccount = accountReport?.current || null;
+    captureReadiness = null;
+    if (!activeCaptureId) captureProgress = null;
+    navigate("keytool");
+  });
   bind("refresh-accounts", async () => {
-    accountReport = await action(
-      "account-status",
-      {},
-      "识别当前微信与已保存账号",
-    );
-    $("#job-dialog").close();
-    paintAccountPanel();
+    await refresh();
+    notice(accountReport?.message || "账号状态已刷新");
   });
   bind("use-current-account", () => useAccount(accountReport.current));
   document.querySelectorAll("[data-account-index]").forEach((b) => {
@@ -240,9 +347,9 @@ async function useAccount(account) {
     throw new Error("请先在微信中登录此账号，再刷新账号状态。");
   if (state.services.running) {
     if (
-      !window.confirm(
+      !(await confirmAction(
         "切换或连接账号前需要暂停当前监控。是否暂停？已有凭据与任务记录会保留。",
-      )
+      ))
     )
       return;
     await action("stop", {}, "暂停当前监控");
@@ -256,6 +363,8 @@ async function useAccount(account) {
     );
     $("#job-dialog").close();
     pendingAccount = null;
+    setupStep = 2;
+    setupDraft = {};
     connectionReport = null;
     captureReadiness = null;
     navigate("setup");
@@ -263,7 +372,9 @@ async function useAccount(account) {
     return;
   }
   pendingAccount = account;
+  requestRecapture = false;
   captureReadiness = null;
+  captureProgress = null;
   navigate("keytool");
   notice(
     "已选择当前登录账号作为取钥目标。请先检查，再按提示授权；旧账号凭据会保留。",
@@ -271,19 +382,36 @@ async function useAccount(account) {
 }
 function render() {
   $("#title").textContent = labels[page];
+  $("#subtitle").textContent = {
+    overview: "关注新消息，确认回复建议。",
+    setup: "一步一步接入，完成后开始处理新消息。",
+    keytool: "连接当前微信账号，凭据仅保存在本机。",
+    records: "原问题、回复草稿和需要你确认的事项。",
+    knowledge: "补充业务事实，让回复更贴合你的工作。",
+    diagnostics: "检查连接状态，处理运行异常。",
+  }[page];
   document
     .querySelectorAll("nav button")
-    .forEach((b) => b.classList.toggle("active", b.dataset.page === page));
+    .forEach((b) =>
+      b.classList.toggle(
+        "active",
+        b.dataset.page === page ||
+          (page === "records" && b.dataset.page === "overview") ||
+          (page === "keytool" && b.dataset.page === "setup"),
+      ),
+    );
   if (page === "overview") overview();
   if (page === "setup") setup();
   if (page === "keytool") keytool();
   if (page === "records") records();
   if (page === "knowledge") knowledge();
   if (page === "diagnostics") diagnostics();
-  if (["setup", "keytool", "overview"].includes(page)) {
-    $("#content").insertAdjacentHTML("afterbegin", accountPanelHTML());
-    bindAccountPanel();
-    updateAccountActions();
+  updateAccountActions();
+  if (page === "keytool" && activeCaptureId) {
+    document
+      .querySelectorAll("#existing-options button, #existing-options input")
+      .forEach((el) => (el.disabled = true));
+    watchCapture(activeCaptureId);
   }
   document.querySelectorAll("[data-op]").forEach((b) =>
     b.addEventListener("click", async () => {
@@ -306,18 +434,60 @@ function overview() {
     (a, r) => a + (r.dsh?.cost_meter?.own?.cost || 0),
     0,
   );
+  const ready =
+    accountReport?.matches_current &&
+    settings.chat_id &&
+    settings.feishu_chat_id;
+  const problem =
+    state.services.last_error || state.services.worker?.last_error;
   $("#content").innerHTML =
-    `${state.services.last_error || state.services.worker?.last_error ? `<p class="error">${escape(state.services.last_error || state.services.worker.last_error)}</p>` : ""}<section class="hero"><div><h2>${state.services.running ? "消息助手已就绪" : "把客户问题，变成可确认的回复建议"}</h2><p>读取选定微信会话，结合业务资料生成建议，送达内部飞书群。你负责最终判断与回复。</p></div><div>${button(state.services.running ? "暂停监控" : "开始监控", state.services.running ? "stop" : "start", true)}</div></section><div class="grid">${card("已投递建议", `<div class="metric">${sent}</div><small>最近 100 条任务中的成功投递</small>`)}${card("待处理事项", `<div class="metric">${review}</div><small>模型、预算或投递结果需核对</small>`)}${card("模型费用估算", `<div class="metric">$${cost.toFixed(4)}</div><small>来自 dsh-cost-meter，非供应商实际账单</small>`)}</div>${card("当前工作流", `<div class="row"><span>微信会话</span><strong>${escape(settings.group_name || "尚未选择")}</strong></div><div class="row"><span>飞书接收群</span><strong>${escape(settings.feishu_chat_name || "尚未连接")}</strong></div><div class="row"><span>投递模式</span><strong>${settings.send_enabled ? "自动投递内部飞书群" : "仅保存本地草稿"}</strong></div><div class="row"><span>微信读取</span><span>${escape(state.services.reader?.state || "stopped")}</span></div><div class="actions"><button id="open-setup">继续配置</button><button id="open-records">查看建议</button></div>`)}`;
-  bind("open-setup", () => navigate("setup"));
+    `${problem ? `<p class="error">${escape(problem)}</p>` : ""}<section class="hero"><div><h2>${state.services.running ? "正在关注新消息" : ready ? "一切就绪，随时开始" : "连接微信，开始你的工作流"}</h2><p>${!accountReport?.matches_current ? escape(accountReport?.message || "先完成微信账号连接，再选择会话与接收群。") : "微信新消息会生成回复建议，按设置送到飞书内部群。"}</p></div><div class="actions">${state.services.running ? button("暂停监控", "stop", true) : ready ? button("开始监控", "start", true) : '<button id="open-setup" class="primary">继续接入设置 →</button>'}</div></section><div class="grid">${card("已投递建议", `<div class="metric">${sent}</div><small>最近 100 条任务</small>`)}${card("需要你确认", `<div class="metric">${review}</div><small>模型、预算或投递异常</small>`)}${card("模型费用估算", `<div class="metric">$${cost.toFixed(4)}</div><small>dsh-cost-meter 用量记录</small>`)}</div>${card("当前连接", `<div class="row"><span class="muted">微信账号</span><strong>${escape(accountReport?.current?.label || "尚未识别")}</strong></div><div class="row"><span class="muted">监听会话</span><strong>${escape(accountReport?.matches_current ? settings.group_name || "尚未选择" : "请先连接当前账号")}</strong></div><div class="row"><span class="muted">飞书接收群</span><strong>${escape(settings.feishu_chat_name || "尚未选择")}</strong></div><div class="row"><span class="muted">运行模式</span><strong>${settings.send_enabled ? "自动投递飞书内部群" : "仅保存本地草稿"}</strong></div><div class="actions"><button id="edit-setup" class="text-button">调整连接配置 →</button></div>`)}<div class="section-title"><h2>最近回复建议</h2><button id="open-records" class="text-button">查看全部 →</button></div>${
+      records.length
+        ? records
+            .slice(0, 3)
+            .map(
+              (r) =>
+                `<article class="record"><div class="row"><strong>${escape(r.group)}</strong><span class="pill">${escape(recordStatus(r.status))}</span></div><p class="original">${escape(r.event?.content || r.event?.text || "")}</p><p>${escape(r.proposal?.suggested_reply || "等待生成回复建议")}</p></article>`,
+            )
+            .join("")
+        : '<div class="empty">开始运行后，新消息的回复建议会出现在这里。</div>'
+    }`;
+  bind("open-setup", () => {
+    setupStep = defaultSetupStep();
+    navigate("setup");
+  });
+  bind("edit-setup", () => {
+    setupStep = 1;
+    navigate("setup");
+  });
   bind("open-records", () => navigate("records"));
 }
-function renderConversationChoices(rows) {
+function recordStatus(status) {
+  return (
+    {
+      sent: "已投递",
+      draft: "本地草稿",
+      queued: "等待生成",
+      inference: "生成中",
+      needs_review: "模型结果需检查",
+      delivery_review: "投递结果待核对",
+      budget_review: "达到调用上限",
+      skipped: "已跳过",
+      dismissed: "已忽略",
+      resolved: "已重新安排",
+      sending: "正在投递",
+    }[status] || status
+  );
+}
+function renderConversationChoices(rows, searched = false) {
   const target = $("#chats");
   if (!target) return;
   target.replaceChildren(
     ...rows.map((r) => {
       const b = document.createElement("button");
       b.textContent = r.name;
+      b.classList.toggle("selected", settings.chat_id === r.username);
+      b.setAttribute("aria-pressed", String(settings.chat_id === r.username));
       b.onclick = async () => {
         try {
           await action(
@@ -333,14 +503,21 @@ function renderConversationChoices(rows) {
       return b;
     }),
   );
+  if (searched && !rows.length)
+    target.innerHTML = '<p class="empty">没有匹配的会话，换个名称试试。</p>';
 }
-function renderFeishuChoices(rows) {
+function renderFeishuChoices(rows, searched = false) {
   const target = $("#feishu-chats");
   if (!target) return;
   target.replaceChildren(
     ...rows.map((r) => {
       const b = document.createElement("button");
       b.textContent = r.name;
+      b.classList.toggle("selected", settings.feishu_chat_id === r.chat_id);
+      b.setAttribute(
+        "aria-pressed",
+        String(settings.feishu_chat_id === r.chat_id),
+      );
       b.onclick = async () => {
         try {
           await action(
@@ -356,6 +533,9 @@ function renderFeishuChoices(rows) {
       return b;
     }),
   );
+  if (searched && !rows.length)
+    target.innerHTML =
+      '<p class="empty">没有找到群。请先在飞书群中添加当前应用的机器人，再重新获取。</p>';
 }
 function runOptions() {
   return {
@@ -364,54 +544,49 @@ function runOptions() {
     login_enabled: $("#login-start").checked,
   };
 }
-function setup() {
-  const hasSavedAccounts = settings.profiles.length > 0;
-  const connected = hasSavedAccounts && accountReport?.matches_current;
-  if (!hasSavedAccounts) {
-    $("#content").innerHTML =
-      `<section class="hero"><div><h2>先连接微信，再开启消息助手</h2><p>第一次使用，从这里完成取钥。账号和数据库目录会自动识别，密钥验证后保存到本机 Keychain。</p></div></section>${card("1 · 首次连接微信", `<p>没有密钥也可以开始。向导先检查环境，只有你点击「授权并开始取钥」后才会备份和临时调整微信。</p><div class="actions"><button id="first-connect" class="primary">首次连接微信（没有密钥）</button><button id="existing-credential">已有密钥或加密备份</button></div><p class="note">需要你完成 macOS 授权，以及按就绪提示登录微信。取钥结束会恢复官方客户端；日常监听只读取本地数据库。</p>`)}${card("接下来会做什么", `<ol class="journey"><li><strong>连接微信</strong><span>检查 → 授权 → 等待登录提示 → 验证、恢复与保存</span></li><li><strong>选择会话</strong><span>先用文件传输助手验证，再选择客户群</span></li><li><strong>连接 DSH 与飞书</strong><span>配置模型渠道和费用插件，选择内部接收群</span></li><li><strong>测试并运行</strong><span>确认一条新增问题能生成建议并送达飞书</span></li></ol><p><a href="https://github.com/CalWade/wx-watcher/blob/main/docs/FIRST_RUN.md">打开新机器完整操作指南 ↗</a></p>`)}<p class="muted">自动取钥当前仅支持已验证组合：Apple Silicon、macOS 27.0、微信 4.1.13（269630）及兼容的 Apple 调试工具。其他组合会说明阻塞原因。</p>`;
-    bind("first-connect", () => {
-      pendingAccount = accountReport?.current || null;
-      captureReadiness = null;
-      navigate("keytool");
-    });
-    bind("existing-credential", () => {
-      navigate("keytool");
-      $("#existing-options").open = true;
-      $("#existing-options").scrollIntoView({ block: "start" });
-    });
-    return;
+const setupStages = [
+  "连接微信",
+  "选择会话",
+  "接入模型",
+  "接入飞书",
+  "开始运行",
+];
+function defaultSetupStep() {
+  if (!accountReport?.matches_current) return 1;
+  if (!settings.chat_id) return 2;
+  if (!settings.feishu_chat_id) return 3;
+  return 5;
+}
+function setSetupStep(step) {
+  if (step > 1 && !accountReport?.matches_current) return;
+  rememberSetupDraft();
+  setupStep = step;
+  render();
+  window.scrollTo(0, 0);
+}
+function rememberSetupDraft() {
+  for (const id of [
+    "chat-query",
+    "feishu-transport",
+    "app-id",
+    "send-enabled",
+    "autostart-monitor",
+    "login-start",
+  ]) {
+    const el = $("#" + id);
+    if (el) setupDraft[id] = el.type === "checkbox" ? el.checked : el.value;
   }
-  $("#content").innerHTML =
-    `${card("自动接入", `<p class="muted">自动识别本机账号，复用已保存凭据、DSH 模型与费用插件，并读取飞书可选群。缺少费用插件时使用 DSH 自带的安装器补齐。</p><button id="auto-connect" class="primary">自动识别并连接</button><div id="onboarding-checks"></div>`)}<div class="steps"><span class="step ${connected ? "done" : ""}">1 连接微信</span><span class="step ${connected && settings.chat_id ? "done" : ""}">2 选择会话</span><span class="step">3 DSH 模型</span><span class="step ${settings.feishu_chat_id ? "done" : ""}">4 飞书接收群</span><span class="step">5 测试并运行</span></div><div class="two">${card("1 · 确认微信账号", `<p>上方分别显示微信当前登录账号、本项目选择的账号，以及各账号的凭据状态。</p><p class="muted">账号不同或当前账号尚无密钥时，请先使用上方入口连接或切换。之前的密钥不能直接用于新账号。</p><button id="go-keytool">查看凭据与取钥向导</button>`)}${card("2 · 选择微信会话", `<p class="muted">只监听明确选择的会话，首次扫描建立基线。</p>${field("搜索群名", "chat-query", settings.group_name)}<div class="actions"><button id="find-chats">搜索会话</button></div><div id="chats"></div><p class="note">${connected ? "当前" : "旧配置会话（切换后需重新选择）"}：${escape(settings.group_name || "尚未选择")}</p>`)}</div><div class="two">${card("3 · DSH 模型与用量", `<p class="muted">复用你在 DSH 中配置的模型渠道。DSH 和 dsh-cost-meter 需要保持可用。</p><div class="actions">${button("安装 / 更新桥接插件", "install-dsh")}${button("测试模型与记账", "test-dsh")}</div><p class="note">模型测试会发起一次真实调用并产生对应渠道用量。</p>`)}${card("4 · 飞书应用机器人", `<label>连接方式<select id="feishu-transport"><option value="cli" ${settings.feishu_transport === "cli" ? "selected" : ""}>复用已有 Lark CLI</option><option value="openapi" ${settings.feishu_transport === "openapi" ? "selected" : ""}>自建飞书应用</option></select></label><div class="actions"><button id="save-transport">保存连接方式</button></div>${settings.feishu_transport === "openapi" ? `<p><a href="https://open.feishu.cn/app" target="_blank" rel="noreferrer">打开飞书应用后台 ↗</a></p><button id="feishu-permissions">下载可批量导入的权限配置</button>${field("自建应用 App ID", "app-id", settings.feishu_app_id)}${field("App Secret（保存后不会显示）", "app-secret", "", "password")}<div class="actions"><button id="save-secret">保存到 Keychain</button></div>` : `<p class="note">复用本机 CLI 已连接的应用与机器人，无需再次填写密钥。</p>`}<div class="actions"><button id="find-feishu">获取机器人所在群</button></div><div id="feishu-chats"></div><p class="note">当前接收群：${escape(settings.feishu_chat_name || "尚未选择")}。先在飞书群中添加应用机器人。</p><div class="actions">${button("发送测试并回读", "test-feishu")}</div>`)}</div>${card("5 · 开启消息助手", `<label class="check"><input id="send-enabled" type="checkbox" ${settings.send_enabled ? "checked" : ""}> 将建议自动发到已选飞书内部群</label><label class="check"><input id="autostart-monitor" type="checkbox" ${settings.autostart_monitor ? "checked" : ""}> 打开本应用后自动恢复监控</label><label class="check"><input id="login-start" type="checkbox" ${state.login_installed ? "checked" : ""}> 登录 Mac 后在菜单栏启动应用</label><p class="muted">保持 Mac 微信登录、DSH 开启。开启前检查待发草稿；已有草稿也可能进入投递。</p><p class="note">「测试全链路并启动」会调用一次模型，并向上方选定飞书群发送一条连通性测试消息。</p><div class="actions"><button id="save-run">保存运行选项</button><button id="finish-setup" class="primary" ${settings.chat_id && settings.feishu_chat_id ? "" : "disabled"}>测试全链路并启动</button>${button("直接开始监控", "start")}${button("暂停监控", "stop")}</div>`)}`;
-  bind("go-keytool", () => navigate("keytool"));
-  bind("auto-connect", async () => {
-    connectionReport = await action("auto-connect", {}, "自动连接本机环境");
-    render();
-  });
-  bind("finish-setup", async () => {
-    await action("finish-setup", runOptions(), "验证模型、费用与飞书并启动");
-    navigate("overview");
-  });
-  if (connectionReport) {
-    $("#onboarding-checks").innerHTML = connectionReport.checks
-      .map(
-        (c) =>
-          `<p class="${c.ok ? "success" : "error"}">${c.ok ? "✓" : "○"} ${escape(c.stage)}${c.message ? "：" + escape(c.message) : ""}</p>`,
-      )
-      .join("");
-    renderConversationChoices(connectionReport.conversations || []);
-    renderFeishuChoices(connectionReport.feishu_chats || []);
-  }
-  bind("find-chats", async () => {
-    renderConversationChoices(
-      await action(
-        "conversations",
-        { query: $("#chat-query").value },
-        "读取本地会话",
-      ),
-    );
-  });
+}
+function stepFooter(previous, next, nextTitle = "下一步", disabled = false) {
+  return `<div class="step-footer"><button id="step-back" class="text-button" ${previous ? "" : "hidden"}>← 上一步</button><div class="actions">${next ? `<button id="step-next" class="primary" ${disabled ? "disabled" : ""}>${escape(nextTitle)} →</button>` : ""}</div></div>`;
+}
+function transportFields() {
+  const transport = setupDraft["feishu-transport"] || settings.feishu_transport;
+  return transport === "openapi"
+    ? `<p class="muted">在飞书开放平台创建应用，并将机器人添加到接收群。</p><div class="form">${field("App ID", "app-id", setupDraft["app-id"] || settings.feishu_app_id)}${field("App Secret · 保存后不再显示", "app-secret", "", "password")}</div><div class="actions"><button id="save-secret">安全保存应用凭据</button><button id="feishu-permissions" class="text-button">下载权限配置</button><a href="https://open.feishu.cn/app" target="_blank" rel="noreferrer">应用后台 ↗</a></div>`
+    : `<p class="note">使用本机 Lark CLI 已连接的应用，无需重新填写密钥。先将这个应用的机器人添加到飞书接收群。</p>`;
+}
+function bindTransportFields() {
   bind("feishu-permissions", () =>
     download("feishu-permissions.json", {
       scopes: {
@@ -424,14 +599,6 @@ function setup() {
       },
     }),
   );
-  bind("save-transport", async () => {
-    await action(
-      "settings",
-      { feishu_transport: $("#feishu-transport").value },
-      "保存飞书连接方式",
-    );
-    render();
-  });
   bind("save-secret", async () => {
     await action(
       "feishu-secret",
@@ -439,14 +606,163 @@ function setup() {
       "安全保存飞书凭据",
     );
     $("#app-secret").value = "";
+    if (connectionReport) connectionReport.feishu_chats = [];
+    delete setupDraft["send-enabled"];
+    render();
   });
+}
+function setup() {
+  if (!setupStep) setupStep = defaultSetupStep();
+  const connected = accountReport?.matches_current === true;
+  if (!connected) setupStep = 1;
+  const done = [
+    connected,
+    connected && !!settings.chat_id,
+    connectionReport?.dsh?.ready === true,
+    connected && !!settings.feishu_chat_id,
+    state.services.running,
+  ];
+  const heading = (title, description) =>
+    `<div class="step-heading"><span class="step-label">第 ${setupStep} 步 / 共 5 步</span><h2>${title}</h2><p>${description}</p></div>`;
+  let content;
+  if (setupStep === 1) {
+    content =
+      heading(
+        "先连接你的微信",
+        "识别当前登录账号，为这个账号准备本地读取凭据。",
+      ) + accountPanelHTML(false);
+    if (!connected) {
+      content += `<p class="muted">首次连接会引导你检查环境、授权取钥并恢复官方微信。完成后凭据保存在本机，日常读取无需重复取钥。</p><div class="actions"><button id="existing-credential" class="text-button">已有密钥或备份</button></div>`;
+    } else {
+      content +=
+        `<p class="muted">当前账号已连接。接下来选择一个会话，用新消息验证完整流程。</p>` +
+        stepFooter(null, 2, "选择微信会话");
+    }
+  } else if (setupStep === 2) {
+    content =
+      heading(
+        "选择要关注的会话",
+        "一次选择一个微信会话。首次使用建议先用文件传输助手测试。",
+      ) +
+      `<label>搜索群名或会话<div class="field-action"><input id="chat-query" placeholder="例如：文件传输助手" value="${escape(setupDraft["chat-query"] ?? settings.group_name)}"><button id="find-chats">搜索会话</button></div></label><div id="chats" class="choice-list" role="group" aria-label="微信会话搜索结果"></div><p class="selected-value">已选会话：<strong>${escape(settings.group_name || "尚未选择")}</strong></p>` +
+      stepFooter(1, 3, "接入模型", !settings.chat_id);
+  } else if (setupStep === 3) {
+    content =
+      heading(
+        "连接你的 DSH 模型",
+        "复用 DSH 中已有的模型渠道，并接入 dsh-cost-meter 记录用量。",
+      ) +
+      `<p class="muted">先打开 DSH 并配置好模型，再点击下方连接。缺少费用插件时会使用 DSH 自带安装器补齐。</p><div class="actions"><button id="auto-connect" class="primary">连接 DSH 与费用插件</button>${button("测试模型与记账", "test-dsh")}</div><div id="onboarding-checks" class="connection-checks" aria-live="polite"></div><p class="note">连接不会发起模型对话。「测试模型」会产生一次真实调用；最后一步也会统一验证。</p><details class="subsection"><summary>手动维护桥接插件</summary><div class="actions">${button("安装 / 更新桥接插件", "install-dsh")}</div></details>` +
+      stepFooter(2, 4, "接入飞书");
+  } else if (setupStep === 4) {
+    const transport =
+      setupDraft["feishu-transport"] || settings.feishu_transport;
+    content =
+      heading(
+        "把建议送到飞书",
+        "选择你们的内部接收群，客户群中的回复仍由你手动确认。",
+      ) +
+      `<div class="form"><label>连接方式<select id="feishu-transport"><option value="cli" ${transport === "cli" ? "selected" : ""}>复用本机 Lark CLI</option><option value="openapi" ${transport === "openapi" ? "selected" : ""}>使用自建飞书应用</option></select></label><div id="transport-fields">${transportFields()}</div></div><div class="actions"><button id="find-feishu" class="primary">获取机器人所在群</button></div><div id="feishu-chats" class="choice-list" role="group" aria-label="飞书接收群"></div><p class="selected-value">接收群：<strong>${escape(settings.feishu_chat_name || "尚未选择")}</strong></p><details class="subsection"><summary>单独测试飞书连接</summary><p class="muted">向已选群发送一条连通性测试消息，并核对是否收到。</p><div class="actions">${button("发送测试并回读", "test-feishu")}</div></details>` +
+      stepFooter(
+        3,
+        5,
+        "确认并运行",
+        !settings.feishu_chat_id || transport !== settings.feishu_transport,
+      );
+  } else {
+    content =
+      heading(
+        "确认配置，开始运行",
+        "最后验证模型、费用记录和飞书投递，然后监听新消息。",
+      ) +
+      `<div class="row"><span class="muted">微信会话</span><strong>${escape(settings.group_name || "尚未选择")}</strong></div><div class="row"><span class="muted">飞书接收群</span><strong>${escape(settings.feishu_chat_name || "尚未选择")}</strong></div><label class="check"><input id="send-enabled" type="checkbox" ${(setupDraft["send-enabled"] ?? settings.send_enabled) ? "checked" : ""}><span><strong>将回复建议自动发送到飞书</strong><small>关闭后仅保存本地草稿。建议内容请人工确认后回复客户。</small></span></label><details class="subsection"><summary>启动方式</summary><label class="check"><input id="autostart-monitor" type="checkbox" ${(setupDraft["autostart-monitor"] ?? settings.autostart_monitor) ? "checked" : ""}><span>打开 NoteBridge 后恢复监控</span></label><label class="check"><input id="login-start" type="checkbox" ${(setupDraft["login-start"] ?? state.login_installed) ? "checked" : ""}><span>登录 Mac 后在菜单栏启动</span></label></details><p class="note">测试会调用一次模型，并向已选飞书群发送一条测试消息。保持 Mac 微信登录、DSH 开启；开启自动投递前，请在工作台检查已有草稿。</p><div class="step-footer"><button id="step-back" class="text-button">← 上一步</button><button id="finish-setup" class="primary" ${settings.chat_id && settings.feishu_chat_id ? "" : "disabled"}>测试并开始运行</button></div><div class="actions"><button id="save-run" class="text-button">仅保存运行选项</button></div>`;
+  }
+  $("#content").innerHTML =
+    `<div class="setup-layout"><ol class="steps" aria-label="接入进度">${setupStages.map((name, i) => `<li><button class="step ${setupStep === i + 1 ? "current" : done[i] ? "done" : ""}" data-step="${i + 1}" ${setupStep === i + 1 ? 'aria-current="step"' : ""} ${!connected && i > 0 ? "disabled" : ""}><span class="step-number">${done[i] && setupStep !== i + 1 ? "✓" : i + 1}</span><span>${name}</span></button></li>`).join("")}</ol>${setupStep > 1 ? `<div class="account-strip"><span>当前账号 · ${escape(accountReport.current?.label)}</span><button id="change-account" class="text-button">管理账号</button></div>` : ""}<section class="card setup-task">${content}</section><p class="setup-help">遇到问题？<a href="https://github.com/CalWade/wx-watcher/blob/main/docs/FIRST_RUN.md" target="_blank" rel="noreferrer">查看接入指南 ↗</a></p></div>`;
+  bindAccountPanel();
+  document
+    .querySelectorAll("[data-step]")
+    .forEach((b) => (b.onclick = () => setSetupStep(Number(b.dataset.step))));
+  bind("step-back", () => setSetupStep(setupStep - 1));
+  bind("step-next", () => setSetupStep(setupStep + 1));
+  bind("change-account", () => setSetupStep(1));
+  bind("existing-credential", () => {
+    pendingAccount = accountReport?.current || null;
+    navigate("keytool");
+    $("#existing-options").open = true;
+    $("#existing-options").scrollIntoView({ block: "start" });
+  });
+  bind("auto-connect", async () => {
+    const result = await action("connect-dsh", {}, "连接 DSH 与费用插件");
+    connectionReport = {
+      ...connectionReport,
+      dsh: result,
+      checks: result.checks || [],
+    };
+    render();
+  });
+  if (connectionReport) {
+    if ($("#onboarding-checks"))
+      $("#onboarding-checks").innerHTML = (connectionReport.checks || [])
+        .map(
+          (c) =>
+            `<p class="${c.ok ? "success" : "error"}">${c.ok ? "✓" : "○"} ${escape(c.stage)}${c.message ? "：" + escape(c.message) : ""}</p>`,
+        )
+        .join("");
+    renderConversationChoices(connectionReport.conversations || []);
+    renderFeishuChoices(connectionReport.feishu_chats || []);
+  }
+  bind("find-chats", async () => {
+    setupDraft["chat-query"] = $("#chat-query").value;
+    const rows = await action(
+      "conversations",
+      { query: $("#chat-query").value },
+      "搜索本地会话",
+    );
+    connectionReport = { ...connectionReport, conversations: rows };
+    renderConversationChoices(rows, true);
+  });
+  $("#chat-query")?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") $("#find-chats").click();
+  });
+  $("#feishu-transport")?.addEventListener("change", () => {
+    setupDraft["feishu-transport"] = $("#feishu-transport").value;
+    $("#transport-fields").innerHTML = transportFields();
+    bindTransportFields();
+    // Results belong to the previously saved transport, not this unsaved choice.
+    if (connectionReport) connectionReport.feishu_chats = [];
+    $("#feishu-chats").replaceChildren();
+    $("#step-next").disabled =
+      setupDraft["feishu-transport"] !== settings.feishu_transport ||
+      !settings.feishu_chat_id;
+    $(".selected-value").textContent =
+      setupDraft["feishu-transport"] !== settings.feishu_transport
+        ? "连接方式已改变，请重新获取并选择接收群。"
+        : "接收群：" + (settings.feishu_chat_name || "尚未选择");
+  });
+  bindTransportFields();
   bind("find-feishu", async () => {
+    const transport = $("#feishu-transport").value;
+    if (transport !== settings.feishu_transport) {
+      await action(
+        "settings",
+        { feishu_transport: transport },
+        "保存飞书连接方式",
+      );
+    }
     const result = await action("feishu-chats", {}, "读取机器人所在群");
-    renderFeishuChoices(result.data?.chats || []);
-    if (!result.data?.chats?.length)
-      notice("机器人尚未加入可访问的群，请先在飞书中添加。");
+    const rows = result.data?.chats || [];
+    connectionReport = { ...connectionReport, feishu_chats: rows };
+    delete setupDraft["send-enabled"];
+    render();
+    renderFeishuChoices(rows, true);
   });
   bind("save-run", () => action("run-settings", runOptions(), "保存运行选项"));
+  bind("finish-setup", async () => {
+    await action("finish-setup", runOptions(), "验证模型、费用与飞书并启动");
+    setupDraft = {};
+    navigate("overview");
+  });
 }
 function captureTimeline(phase) {
   const stages = [
@@ -484,10 +800,13 @@ function captureTimeline(phase) {
       "成功必须通过数据库验证、恢复官方客户端并保存 Keychain",
     ],
   ];
+  const current = stages.findIndex(([, phases]) =>
+    phases.includes(phase || "idle"),
+  );
   return stages
     .map(
-      ([title, phases, hint]) =>
-        `<li class="${phases.includes(phase || "idle") ? "current" : ""}"><strong>${escape(title)}</strong><span>${escape(hint)}</span></li>`,
+      ([title, phases, hint], index) =>
+        `<li class="${index === current ? "current" : index < current ? "done" : ""}"><strong>${escape(title)}</strong><span>${escape(hint)}</span></li>`,
     )
     .join("");
 }
@@ -501,8 +820,45 @@ function keytool() {
     (!accountReport?.matches_current ? accountReport?.current : null);
   const root = report?.db_root || target?.db_root || profile?.db_root || "";
   const targetIsSaved = profile && root === profile.db_root;
+  const active = !!activeCaptureId;
+  const completed = targetIsSaved && captureProgress?.phase === "completed";
+  const phase = captureProgress?.phase || "idle";
+  const alreadyConnected = targetIsSaved && !requestRecapture;
+  const checks = report?.checks || [];
+  const checksHTML = checks
+    .map(
+      (c) =>
+        `<div class="readiness ${c.ok ? "passed" : "blocked"}"><span class="check-mark" aria-hidden="true">${c.ok ? "✓" : "!"}</span><div><strong>${escape(c.title)}</strong><p>${escape(c.message)}</p>${!c.ok && c.action === "xcode" ? '<a href="https://developer.apple.com/xcode/resources/" target="_blank" rel="noreferrer">获取 Apple 开发工具 ↗</a>' : ""}${!c.ok && c.action === "wechat" ? '<a href="https://mac.weixin.qq.com/" target="_blank" rel="noreferrer">官方微信网站 ↗</a>' : ""}${!c.ok && c.action === "privacy" ? '<button id="check-open-privacy" class="text-button">打开权限设置</button>' : ""}</div></div>`,
+    )
+    .join("");
   $("#content").innerHTML =
-    `<section class="hero"><div><h2>${profile ? "微信凭据与连接管理" : "首次连接微信 · 取钥向导"}</h2><p>先检查，后授权。密钥通过数据库验证并保存后，才进入会话、模型和飞书配置。</p></div>${targetIsSaved ? button("验证当前凭据", "verify-key") : ""}</section><div class="two">${card("1 · 检查这台 Mac", `<p class="muted">请先正常登录官方 Mac 微信，让消息资料保存到本机。检查不会退出、重签或调试微信。</p><button id="capture-check" class="primary">${report ? "重新检查" : "检查并识别微信账号"}</button><div id="capture-checks" aria-live="polite">${report ? report.checks.map((c) => `<div class="readiness ${c.ok ? "passed" : "blocked"}"><strong>${c.ok ? "✓" : "○"} ${escape(c.title)}</strong><p>${escape(c.message)}</p>${!c.ok && c.action === "xcode" ? '<a href="https://developer.apple.com/xcode/resources/">获取 Apple 开发工具 ↗</a>' : ""}${!c.ok && c.action === "wechat" ? '<a href="https://mac.weixin.qq.com/">官方微信网站 ↗</a>' : ""}</div>`).join("") : '<p class="note">新电脑还没有微信消息资料时，先登录并向文件传输助手发一条「NoteBridge 连接测试」，然后点击检查。</p>'}</div><p id="selected-account" class="muted">${report?.account_label || target?.label ? "本次取钥目标：" + escape(report?.account_label || target?.label) : "账号会在检查时识别；有多个历史账号时请先登录目标账号。"}</p><div class="actions"><button id="open-privacy">打开完整磁盘访问设置</button><button id="open-app-management">打开 App 管理设置</button></div><p class="note">权限列表没有本应用时，将窗口底部的应用图标拖入列表。开启后点底部「重新连接」，再回来检查。无需在页面输入系统密码。</p>`)}${card("2 · 按提示完成取钥", `<p>开始后工具会备份官方客户端、临时重签并连接调试器。完成或取消后尝试恢复官方微信；首次取钥不能保证零风控风险。</p><div class="actions"><button id="capture-start" class="primary" ${report?.ready ? "" : "disabled"}>授权并开始取钥</button></div><p class="muted">${report?.ready ? "检查通过，可以开始。系统权限仍由 macOS 在需要时确认。" : "先完成左侧检查；有阻塞项时不会进入取钥。"}</p><ol id="capture-timeline" class="journey">${captureTimeline(captureProgress?.phase)}</ol><div id="capture-progress" class="note" role="status">${escape(captureProgress?.message || "尚未开始。微信重开后先停在登录页；等向导明确提示「监听已就绪」才点击微信登录。")}</div><div class="actions"><button id="capture-login-ready" hidden>我已停在登录页，准备监听</button><button id="capture-cancel" disabled>取消并恢复</button></div>`)}</div>${card("本次账号连接结果", targetIsSaved ? `<div class="row"><strong>${escape(profile.label)}</strong><span class="pill ok">Keychain 已保存</span></div><p class="muted">验证：${escape(profile.verification?.verified || 0)} / ${escape(profile.verification?.total || 0)} 份数据库。取钥完成后，请在恢复的官方微信中正常登录，再继续配置。</p><div class="actions"><button id="continue-setup" class="primary">下一步：选择会话</button></div>` : '<div class="empty">当前取钥目标尚未连接。完成验证并保存后才能继续；其他账号的已存凭据保留在上方账号列表。</div>')}<details id="existing-options" class="card"><summary>已有密钥 / 加密备份 / 手动选择账号（高级选项）</summary><p class="muted">首次连接通常不需要填写这些路径。已有密钥请使用本人可读的文件；不要把密钥粘贴到聊天或日志。</p><label>数据库目录<div class="field-action"><input id="db-root" value="${escape(root)}" placeholder="自动识别或选择 db_storage 目录"><button id="pick-root">选择</button></div></label><div class="actions"><button id="find-accounts">识别本机账号</button></div><div id="account-choices"></div><label>密钥文件<div class="field-action"><input id="key-file" placeholder="选择现有密钥文件"><button id="pick-key">选择</button></div></label>${field("账号备注", "profile-label", report?.account_label || target?.label || profile?.label || "")}<div class="actions"><button id="import-key">验证并存入 Keychain</button></div><h3>加密备份与恢复</h3><p class="muted">备份使用独立口令加密。请保管口令；工具不会保存备份口令。</p>${field("备份 / 恢复口令（至少 12 个字符）", "backup-password", "", "password")}<div class="actions"><button id="backup-key" ${targetIsSaved ? "" : "disabled"}>下载本次账号的加密备份</button><button id="restore-key">导入加密备份</button><input id="backup-file" type="file" accept=".json" hidden></div></details>${card("取钥任务与恢复", `<p class="muted">中断的任务在这里继续查看；如恢复未完成，请先恢复官方客户端。</p><button id="refresh-captures">刷新取钥任务</button><div id="capture-sessions"></div>`)}`;
+    `<div class="account-strip"><button id="back-to-setup" class="text-button">← 返回接入设置</button><span id="selected-account">本次取钥目标：${escape(report?.account_label || target?.label || profile?.label || "检查时自动识别")}</span></div><div class="capture-layout"><ol id="capture-timeline" class="journey" aria-label="微信连接进度">${captureTimeline(phase)}</ol><div class="capture-main">
+    <section class="card" id="capture-task">
+      <div class="step-heading"><h2>${active ? "按提示完成微信登录" : completed || alreadyConnected ? "微信连接已完成" : report?.ready ? "检查通过，可以连接" : "首次连接微信 · 取钥向导"}</h2><p>${active ? "请留在这个向导，下一步操作会在这里明确提示。" : completed || alreadyConnected ? "凭据已安全保存，可以继续选择会话。" : report?.ready ? "准备好暂时中断微信使用后，再开始取钥。" : "先检查这台 Mac，确认账号、读取权限与兼容条件。"}</p></div>
+      <div id="capture-preparation" ${active || completed || alreadyConnected ? "hidden" : ""}>
+        ${report ? "" : '<p class="muted">请先正常登录 Mac 微信，并向文件传输助手发送一条消息，让资料保存到本机。检查只读取环境信息。</p>'}
+        <div id="capture-checks" aria-live="polite">${report?.ready ? `<details><summary>✓ ${checks.length} 项检查全部通过 · 查看详情</summary>${checksHTML}</details>` : checksHTML}</div>
+        <div class="actions"><button id="capture-check" class="${report?.ready ? "" : "primary"}">${report ? "重新检查" : "检查并识别微信账号"}</button><button id="capture-start" class="primary" ${report?.ready ? "" : "disabled"} ${!report?.ready ? "hidden" : ""}>授权并开始取钥</button></div>
+        ${report?.ready ? '<p class="note">这一步会备份微信、临时重签并连接调试器，结束后恢复官方客户端。需要系统授权；首次取钥无法保证零风控风险。</p>' : ""}
+      </div>
+      <div id="capture-live" ${active || (captureProgress && !completed) ? "" : "hidden"}><p id="capture-progress" class="note" role="status">${escape(captureProgress?.message || "正在准备，请稍候…")}</p><div class="actions"><button id="capture-login-ready" class="primary" hidden>我已停在登录页，准备监听</button><button id="capture-cancel" class="text-button" disabled>取消并恢复</button></div></div>
+      ${targetIsSaved ? `<div id="credential-result" class="${completed ? "" : "subsection"}"><div class="row"><strong>${escape(profile.label)}</strong><span class="pill ok">Keychain 已保存</span></div><p class="muted">${escape(profile.verification?.verified || 0)} / ${escape(profile.verification?.total || 0)} 份数据库已验证。请在恢复后的官方微信中正常登录，再继续。</p><div class="actions"><button id="continue-setup" class="primary">下一步：选择会话</button>${button("验证当前凭据", "verify-key")}</div>${!active && !completed && !requestRecapture ? '<div class="subsection"><button id="recapture" class="text-button">需要重新获取凭据？</button></div>' : ""}</div>` : ""}
+    </section>
+    <details class="card" id="permission-options"><summary>权限帮助</summary><p class="muted">在系统设置中允许 NoteBridge 读取微信资料。列表中没有应用时，将窗口底部的图标拖入列表，开启后点击「重新连接」。</p><div class="actions"><button id="open-privacy">完整磁盘访问设置</button><button id="open-app-management">App 管理设置</button></div></details>
+  </div></div>
+  <details id="existing-options" class="card"><summary>已有密钥或备份 · 手动导入</summary><p class="muted">首次连接无需填写路径。已有凭据可在这里导入；不要将密钥粘贴到聊天或日志。</p><div class="form"><label>数据库目录<div class="field-action"><input id="db-root" value="${escape(root)}" placeholder="自动识别或选择 db_storage 目录"><button id="pick-root">选择目录</button></div></label><div><button id="find-accounts">识别本机账号</button><div id="account-choices" class="choice-list"></div></div><label>密钥文件<div class="field-action"><input id="key-file" placeholder="选择现有密钥文件"><button id="pick-key">选择文件</button></div></label>${field("账号备注", "profile-label", report?.account_label || target?.label || profile?.label || "")}</div><div class="actions"><button id="import-key" class="primary">验证并保存凭据</button></div><div class="subsection"><h3>加密备份与恢复</h3><p class="muted">请单独保管备份口令，工具不会保存它。</p>${field("备份 / 恢复口令 · 至少 12 个字符", "backup-password", "", "password")}<div class="actions"><button id="backup-key" ${targetIsSaved ? "" : "disabled"}>下载当前凭据备份</button><button id="restore-key">导入加密备份</button><input id="backup-file" type="file" accept=".json" hidden></div></div></details>
+  <details class="card" id="capture-history"><summary>历史取钥任务与恢复</summary><p class="muted">中断的任务可在这里继续。如恢复未完成，请先恢复官方客户端。</p><button id="refresh-captures">刷新任务</button><div id="capture-sessions"></div></details>`;
+  bind("recapture", () => {
+    requestRecapture = true;
+    captureReadiness = null;
+    captureProgress = null;
+    render();
+  });
+  bind("back-to-setup", () => {
+    setupStep = 1;
+    navigate("setup");
+  });
+  bind("check-open-privacy", openPrivacy);
   bind("open-privacy", openPrivacy);
   bind("open-app-management", () => {
     if (window.webkit?.messageHandlers?.native)
@@ -559,9 +915,14 @@ function keytool() {
       },
       "验证并保存微信凭据",
     );
+    pendingAccount = null;
+    captureReadiness = null;
     render();
   });
-  bind("continue-setup", () => navigate("setup"));
+  bind("continue-setup", () => {
+    setupStep = 2;
+    navigate("setup");
+  });
   bind("capture-check", async () => {
     captureReadiness = await action(
       "connection-check",
@@ -573,9 +934,9 @@ function keytool() {
   });
   bind("capture-start", async () => {
     if (
-      !window.confirm(
+      !(await confirmAction(
         "本次取钥会退出并重新打开微信、临时重签和连接调试器；工具会备份并在结束时恢复官方客户端。系统将要求管理员授权。开始后请按向导提示操作登录。是否开始？",
-      )
+      ))
     )
       return;
     const result = await action(
@@ -585,7 +946,8 @@ function keytool() {
     );
     $("#job-dialog").close();
     captureProgress = result;
-    watchCapture(result.capture_id);
+    activeCaptureId = result.capture_id;
+    render();
   });
   bind("backup-key", async () => {
     const result = await action(
@@ -612,6 +974,8 @@ function keytool() {
         },
         "恢复并验证凭据",
       );
+      pendingAccount = null;
+      captureReadiness = null;
       render();
     } catch (error) {
       notice(error.message, true);
@@ -634,6 +998,8 @@ async function loadCaptureSessions() {
         useAccount.textContent = "使用本次识别到的账号目录";
         useAccount.onclick = () => {
           $("#db-root").value = r.observed_db_roots[0];
+          captureReadiness = null;
+          $("#capture-start").disabled = true;
           notice("已选用本次微信实际打开的账号目录，可以重新检查取钥条件。");
         };
         row.append(useAccount);
@@ -671,24 +1037,40 @@ async function loadCaptureSessions() {
       return row;
     }),
   );
+  if (
+    rows.some(
+      (r) =>
+        !["completed", "failed", "cancelled", "recovered"].includes(r.phase),
+    )
+  ) {
+    $("#capture-history").open = true;
+    if ($("#capture-start")) $("#capture-start").disabled = true;
+  }
   if (!rows.length)
     box.textContent = "没有首次取钥任务。已有密钥导入无需启动取钥。";
 }
 function watchCapture(id) {
   clearInterval(timer);
+  activeCaptureId = id;
   const loginReady = $("#capture-login-ready");
+  if (!loginReady) return;
+  $("#capture-preparation").hidden = true;
+  $("#capture-live").hidden = false;
   loginReady.hidden = true;
   loginReady.onclick = async () => {
+    if (activeOperation) return;
+    loginReady.disabled = true;
     try {
       await action(
         "capture-login-ready",
         { capture_id: id },
         "确认已停在微信登录页",
       );
-      $("#job-dialog").close();
       loginReady.hidden = true;
     } catch (error) {
       notice(error.message, true);
+    } finally {
+      loginReady.disabled = false;
     }
   };
   $("#capture-start").disabled = true;
@@ -700,14 +1082,23 @@ function watchCapture(id) {
     );
   let busy = false;
   const poll = async () => {
-    if (busy || page !== "keytool") return;
+    if (busy || page !== "keytool" || activeCaptureId !== id) return;
     busy = true;
     try {
       const progress = await quietAction("capture-status", { capture_id: id });
-      const target = $("#capture-progress");
-      if (!target) return;
+      if (page !== "keytool" || activeCaptureId !== id) return;
       captureProgress = progress;
-      target.textContent = progress.message || progress.phase;
+      $("#capture-task h2").textContent =
+        {
+          awaiting_login_page: "先停在微信登录页",
+          ready_for_login: "现在可以登录微信",
+          waiting: "等待登录与密钥验证",
+          attaching: "正在连接，请暂不登录",
+          restoring: "正在恢复官方微信",
+          verifying: "正在验证凭据",
+          captured: "正在安全保存凭据",
+        }[progress.phase] || "正在处理，请按提示操作";
+      $("#capture-progress").textContent = progress.message || progress.phase;
       $("#capture-timeline").innerHTML = captureTimeline(progress.phase);
       loginReady.hidden = progress.phase !== "awaiting_login_page";
       if (progress.phase === "ready_for_login")
@@ -722,17 +1113,24 @@ function watchCapture(id) {
         ].includes(progress.phase)
       ) {
         clearInterval(timer);
-        $("#capture-cancel").disabled = true;
+        activeCaptureId = null;
+        captureReadiness = null;
+        if (progress.phase === "completed") pendingAccount = null;
         await refresh();
-        await loadCaptureSessions();
+        if (page !== "keytool") return;
+        render();
         if (progress.phase === "completed") {
-          pendingAccount = null;
-          captureReadiness = null;
-          render();
           notice(
-            `连接完成：${progress.verified} / ${progress.total} 份数据库验证通过，官方微信已恢复，密钥已保存。请正常登录恢复的微信，再点击「下一步：选择会话」。`,
+            `连接完成：${progress.verified} / ${progress.total} 份数据库验证通过，官方微信已恢复，密钥已保存。请正常登录后继续选择会话。`,
           );
-        }
+        } else if (progress.phase === "recovery_required") {
+          $("#capture-history").open = true;
+          notice("需要先恢复官方微信，请使用下方任务中的恢复按钮。", true);
+        } else
+          notice(
+            progress.message || "本次取钥已结束。可重新检查后再试。",
+            progress.phase === "failed",
+          );
       }
     } catch (e) {
       notice(e.message, true);
@@ -758,7 +1156,7 @@ function records() {
     sending: "正在投递",
   };
   $("#content").innerHTML =
-    `<p class="muted">查看原问题、建议和待确认事项。投递结果不明确的任务请先核对飞书，避免重复发送。</p>` +
+    `<div class="account-strip"><button id="back-to-overview" class="text-button">← 返回工作台</button></div><p class="muted">查看原问题、建议和待确认事项。投递结果不明确的任务请先核对飞书，避免重复发送。</p>` +
     (state.records.length
       ? state.records
           .map(
@@ -767,6 +1165,7 @@ function records() {
           )
           .join("")
       : '<div class="empty">暂无任务。完成配置并开启监控后，新消息会出现在这里。</div>');
+  bind("back-to-overview", () => navigate("overview"));
   document.querySelectorAll("[data-task]").forEach((b) =>
     b.addEventListener("click", async () => {
       try {
@@ -783,7 +1182,7 @@ function records() {
               : decision === "retry"
                 ? "重新开始监控后会发起一次新的模型调用，并按发送开关安排投递。继续？"
                 : "忽略这条任务？";
-        if (!window.confirm(warning)) return;
+        if (!(await confirmAction(warning))) return;
         await action(
           "task-review",
           {
@@ -865,7 +1264,7 @@ function diagnostics() {
   );
   bind("reset-cursor", async () => {
     if (
-      window.confirm(
+      await confirmAction(
         "确认接受超过保留期的未消费事件无法自动补回？请先暂停监控。系统会记录这次缺口并从当前最新游标继续。",
       )
     )
@@ -889,12 +1288,21 @@ function download(name, value) {
 }
 function navigate(next) {
   clearInterval(timer);
+  if (page === "setup") rememberSetupDraft();
   page = labels[next] ? next : "overview";
   history.replaceState(null, "", "#" + page);
   $("#notice").textContent = "";
   $("#notice").className = "";
   render();
+  window.scrollTo(0, 0);
 }
+$(".brand").addEventListener("click", (e) => {
+  e.preventDefault();
+  navigate("overview");
+});
+$("#job-dialog").addEventListener("cancel", (e) => {
+  if (activeOperation) e.preventDefault();
+});
 $("#job-close").addEventListener("click", () => $("#job-dialog").close());
 document
   .querySelectorAll("[data-page]")
@@ -904,6 +1312,7 @@ document
     const params = new URLSearchParams(location.hash.slice(1));
     const token = params.get("token");
     page = params.get("page") || location.hash.slice(1) || "setup";
+    if (!labels[page]) page = "setup";
     if (token) await api("auth", { token });
     history.replaceState(null, "", "#" + page);
     await refresh();
@@ -911,7 +1320,20 @@ document
     setInterval(async () => {
       try {
         await refresh();
-        if (["overview", "records"].includes(page)) render();
+        const passive = JSON.stringify([page, state, accountReport, settings]);
+        if (
+          ["overview", "records"].includes(page) &&
+          passive !== lastPassiveView &&
+          !activeOperation &&
+          !$("#confirm-dialog").open &&
+          !$("#job-dialog").open
+        ) {
+          const focused = document.activeElement;
+          if (!$("#content").contains(focused)) {
+            render();
+            lastPassiveView = passive;
+          }
+        }
       } catch (_) {
         $("#health").textContent = "○ 本地后台已断开";
         $("#health").className = "pill warn";

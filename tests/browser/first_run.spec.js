@@ -19,7 +19,15 @@ test.beforeEach(async ({ page }) => {
     const response = await route.fetch();
     const settings = await response.json();
     await route.fulfill({
-      json: { ...settings, profiles: [], active_profile: "" },
+      json: {
+        ...settings,
+        profiles: [],
+        active_profile: "",
+        chat_id: "",
+        group_name: "",
+        feishu_chat_id: "",
+        feishu_chat_name: "",
+      },
     });
   });
   await page.route("**/api/action/account-status", (route) =>
@@ -125,8 +133,8 @@ test("first-run login gate leads to verified completion and session setup", asyn
   await page.locator("#first-connect").click();
   await page.locator("#capture-check").click();
   await expect(page.locator("#capture-start")).toBeEnabled();
-  page.once("dialog", (dialog) => dialog.accept());
   await page.locator("#capture-start").click();
+  await page.locator("#confirm-yes").click();
   await expect(page.locator("#capture-login-ready")).toBeVisible();
   await expect(page.locator("#capture-timeline .current")).toContainText(
     "停在登录页",

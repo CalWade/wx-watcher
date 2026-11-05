@@ -86,6 +86,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         web.navigationDelegate = self
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1160, height: 780),
             styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+        window.contentMinSize = NSSize(width: 760, height: 560)
         window.title = isKeytool ? "NoteBridge Setup · 连接配置" : "NoteBridge · 本地消息助手"
         let container = NSView()
         privacyFooter = NSView()
@@ -101,8 +102,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         ])
         let drag = ApplicationDragView(frame: NSRect(x: 16, y: 8, width: 44, height: 44))
         privacyFooter.addSubview(drag)
-        let guidance = NSTextField(labelWithString: "系统未列出应用时，将左侧图标拖入权限列表。完成授权后点击重新连接。")
-        guidance.frame = NSRect(x: 72, y: 20, width: 720, height: 22)
+        let guidance = NSTextField(wrappingLabelWithString: "将左侧图标拖入系统权限列表，开启访问权限。完成后点击「重新连接」。")
+        guidance.font = NSFont.systemFont(ofSize: 12)
+        guidance.textColor = .secondaryLabelColor
+        guidance.maximumNumberOfLines = 2
+        guidance.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         privacyFooter.addSubview(guidance)
         let reconnect = NSButton(title: "重新连接", target: self, action: #selector(restartInterface))
         privacyFooter.addSubview(reconnect)
@@ -220,7 +224,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     }
     @objc func show() { window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true) }
     @objc func quit() { NSApp.terminate(nil) }
-    func showPermissionHelp() { privacyFooter.isHidden = false; footerHeight.constant = 60 }
+    func showPermissionHelp() { privacyFooter.isHidden = false; footerHeight.constant = 72 }
     @objc func restartInterface() {
         let process = backend
         if process?.isRunning == true { process?.terminate() }

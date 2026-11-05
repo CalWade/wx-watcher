@@ -141,3 +141,20 @@ class AccountNameTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 self.state.save_account_names(self.root, custom_label=label)
         self.assertEqual(before, self.state.load())
+
+    def test_name_refresh_explains_permission_without_exposing_database_path(self):
+        c = Controller(self.home / "controller")
+        c.services.shutdown_event.set()
+        try:
+            c.state.add_profile(self.root, "synthetic-key")
+            with patch(
+                "wx_watcher.account_names.read_identity",
+                side_effect=PermissionError(1, "denied", str(self.db)),
+            ):
+                with self.assertRaisesRegex(
+                    PermissionError, "本地备注仍可修改"
+                ) as raised:
+                    c.refresh_account_names(str(self.root))
+            self.assertNotIn(str(self.db), str(raised.exception))
+        finally:
+            c.pool.shutdown(wait=True)

@@ -239,8 +239,16 @@ class Controller:
                 root, **identity, identity_profile_id=profile["id"]
             )
             return {**result, "message": "微信昵称与微信号已更新，本地备注会保留"}
-        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
             if not quiet:
+                if isinstance(exc, PermissionError):
+                    raise PermissionError(
+                        "尚未获得读取微信资料的权限。请在权限帮助中完成授权并重新连接；本地备注仍可修改。"
+                    ) from None
+                if isinstance(exc, subprocess.TimeoutExpired):
+                    raise RuntimeError(
+                        "读取微信资料超时，请稍后重试；本地备注仍可修改。"
+                    ) from None
                 raise
             self.state.save_account_names(root, identity_profile_id=profile["id"])
             return self.state.account_display(root)

@@ -7,7 +7,7 @@ struct LLDBCaptureScriptTests {
     let script = LLDBCaptureScript.script(processID: 4242)
     let encoded = String(script.dropFirst("script exec(".count).dropLast(2)).trimmingCharacters(in: .newlines)
     let python = try #require(JSONSerialization.jsonObject(with: Data(encoded.utf8), options: [.fragmentsAllowed]) as? String)
-    let steps = ["process attach -p 4242", "GB_CAPTURE_ATTACHED", "BreakpointCreateByName", "SetCommandLineCommands", "GetCommandLineCommands", "GB_CAPTURE_ARMED", "checked(\"process continue\")", "GB_CAPTURE_RUNNING"]
+    let steps = ["SetAsync(False)", "process attach -p 4242", "GB_CAPTURE_ATTACHED", "BreakpointCreateByName", "SetCommandLineCommands", "GetCommandLineCommands", "GB_CAPTURE_ARMED", "checked(\"process continue\", \"resume\")", "GB_CAPTURE_RUNNING"]
     var offset = python.startIndex
     for step in steps {
       let found = try #require(python.range(of: step, range: offset..<python.endIndex))

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.2
+
+- Keep suspended WeChat alive across launcher exit by creating a separate process session. The prior helper inherited a process group that macOS terminated when it became orphaned.
+- Check process survival before attaching; distinguish missing targets, denied attachment, setup errors and actual timeouts. Retain only fixed diagnostic categories.
+- Exercise the actual short-lived Foundation Process handoff in regression tests, including first-call capture and failure cleanup with real LLDB. A temporary re-signed WeChat copy also reproduces the old failure and survives with the fix without being resumed.
+- Align the DSH bridge version with the app so initial connection does not report a version mismatch.
+- End-to-end capture with the installed update remains a separate acceptance step; see docs/VALIDATION.md.
+
 ## 0.4.1
 
 - Start WeChat suspended under the signed-in macOS user, install the key listener, then allow its login window to run. Remove the manual login-page confirmation from new capture jobs.

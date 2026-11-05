@@ -55,22 +55,28 @@ public enum LLDBCaptureScript {
     // must not fall through to `continue` or publish a false ready marker.
     let setup = """
     import lldb
-    def checked(command):
+    def checked(command, stage):
         result = lldb.SBCommandReturnObject()
         lldb.debugger.GetCommandInterpreter().HandleCommand(command, result)
         if not result.Succeeded():
-            raise RuntimeError("GB_CAPTURE_SETUP_FAILED")
-    checked("settings set target.preload-symbols false")
-    checked("settings set target.process.stop-on-exec false")
-    checked("settings set interpreter.prompt-on-quit false")
-    checked("process attach -p \(processID)")
+            detail = (result.GetError() or "").lower()
+            if stage == "attach" and any(s in detail for s in ("no such process", "does not exist", "doesn't exist")):
+                stage = "target_missing"
+            elif stage == "attach" and any(s in detail for s in ("not allowed", "permission", "not permitted")):
+                stage = "attach_denied"
+            raise RuntimeError("GB_CAPTURE_SETUP_FAILED:" + stage)
+    checked("settings set target.preload-symbols false", "configuration")
+    checked("settings set target.process.stop-on-exec false", "configuration")
+    checked("settings set interpreter.prompt-on-quit false", "configuration")
+    lldb.debugger.SetAsync(False)
+    checked("process attach -p \(processID)", "attach")
     target = lldb.debugger.GetSelectedTarget()
     if target.GetProcess().GetState() != lldb.eStateStopped:
-        raise RuntimeError("GB_CAPTURE_SETUP_FAILED")
+        raise RuntimeError("GB_CAPTURE_SETUP_FAILED:target_not_stopped")
     print("GB_CAPTURE_ATTACHED", flush=True)
     bp = target.BreakpointCreateByName("CCKeyDerivationPBKDF")
     if not bp.IsValid() or not bp.IsEnabled():
-        raise RuntimeError("GB_CAPTURE_SETUP_FAILED")
+        raise RuntimeError("GB_CAPTURE_SETUP_FAILED:breakpoint")
     bp.SetCondition("\(architecture.databaseKeyCondition)")
     commands = lldb.SBStringList()
     commands.AppendString("memory read --size 1 --count 32 --format x $\(architecture.passwordRegister)")
@@ -80,10 +86,10 @@ public enum LLDBCaptureScript {
     installed = lldb.SBStringList()
     bp.GetCommandLineCommands(installed)
     if installed.GetSize() != 3:
-        raise RuntimeError("GB_CAPTURE_SETUP_FAILED")
+        raise RuntimeError("GB_CAPTURE_SETUP_FAILED:breakpoint_commands")
     print("GB_CAPTURE_ARMED", flush=True)
     lldb.debugger.SetAsync(True)
-    checked("process continue")
+    checked("process continue", "resume")
     print("GB_CAPTURE_RUNNING", flush=True)
     """
     // JSON string literals are also valid Python strings for this ASCII script.

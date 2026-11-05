@@ -7,6 +7,14 @@ import Security
 @testable import NoteBridgeAccess
 
 @Suite struct KeytoolTests {
+    @Test func immediateLaunchFailureIsNotPresentedAsTimeout() {
+        let missing = debuggerFailureCode("target_missing")
+        #expect(captureFailureMessage(missing).contains("监听连接前已退出"))
+        #expect(!captureFailureMessage(missing).contains("超时"))
+        #expect(!captureFailureMessage(debuggerFailureCode("breakpoint")).contains("90 秒"))
+        #expect(captureFailureMessage(debuggerFailureCode("attach_denied")).contains("拒绝"))
+        #expect(captureFailureMessage(debuggerFailureCode("attach_timeout")).contains("90 秒"))
+    }
     @Test func missingLocalDataIsDistinguishedFromPrivacyDenial() {
         #expect(databaseAccessHint(ENOENT).contains("正常登录"))
         #expect(!databaseAccessHint(ENOENT).contains("完整磁盘"))

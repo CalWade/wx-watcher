@@ -242,10 +242,19 @@ async function refreshState() {
   [settings, state] = fresh;
   try {
     const previous = accountReport?.current?.db_root;
+    const previousSelected = accountReport?.selected?.db_root;
     accountReport = await quietAction("account-status");
-    if (previous !== accountReport.current?.db_root) {
+    const current = accountReport.current?.db_root;
+    const selected = accountReport.selected?.db_root;
+    if (previous !== current) {
       captureReadiness = null;
-      if (previous && !activeCaptureId) {
+      // Losing login detection during official-client restoration is not an account switch.
+      if (
+        current &&
+        current !== selected &&
+        current !== previous &&
+        !activeCaptureId
+      ) {
         pendingAccount = null;
         captureProgress = null;
         setupDraft = {};
@@ -253,6 +262,11 @@ async function refreshState() {
         setupStep = 1;
         if (page === "setup" || page === "keytool") render();
       }
+    }
+    if (previousSelected && previousSelected !== selected && !activeCaptureId) {
+      setupDraft = {};
+      connectionReport = null;
+      setupStep = canConfigureAccount() ? 2 : 1;
     }
   } catch (error) {
     captureReadiness = null;
@@ -281,11 +295,13 @@ function accountPanelHTML(framed = true) {
   const r = accountReport;
   const rows = r?.accounts || [];
   const hasSaved = settings.profiles?.length > 0;
-  return `<section id="account-panel" ${framed ? 'class="card"' : ""}><h2>微信账号</h2><div class="account-summary"><div><span class="label">微信当前登录</span><strong id="wechat-current-account">${escape(r?.current?.label || "尚未识别，请登录微信后刷新")}</strong></div><div><span class="label">NoteBridge 已连接</span><strong id="project-selected-account">${escape(r?.selected?.label || "尚未连接")}</strong></div></div><p id="account-message" class="${r?.matches_current ? "success" : "note"}">${escape(r?.message || "正在识别账号…")}</p><div class="actions">${r?.code === "unavailable" ? '<button id="account-privacy" class="primary">允许读取微信资料</button>' : ""}${(!hasSaved || !r?.current) && page === "setup" ? `<button id="first-connect" class="${r?.code === "unavailable" ? "" : "primary"}">${hasSaved ? "检查微信连接" : "首次连接微信"}</button>` : ""}${r?.current && (hasSaved || page !== "setup") ? `<button id="use-current-account" class="${r.matches_current || page === "keytool" ? "" : "primary"}">${r.current.credential_saved ? (r.matches_current ? "验证当前账号" : "验证并切换到当前账号") : "连接当前账号"}</button>` : ""}<button id="refresh-accounts" class="text-button">刷新账号</button></div><details id="account-list"><summary id="account-toggle">已发现的账号 · ${rows.length}</summary>${rows.map((a, i) => `<div class="row"><div class="grow"><strong>${escape(a.label)}</strong><p class="muted">${a.active ? "微信当前登录 · " : "历史账号资料 · "}${a.credential_saved ? "密钥已保存" : "尚无密钥"}${a.selected ? " · 本项目正在使用" : ""}</p></div><div class="actions"><button data-name-index="${i}" class="text-button">显示名称</button><button data-account-index="${i}" ${a.active ? "" : "disabled"}>${a.credential_saved ? "验证并使用" : "连接此账号"}</button></div></div>`).join("")}<p class="muted">首次连接可在取钥向导选择历史账号，或登录其他账号。每个账号分别保存凭据。</p></details></section>`;
+  return `<section id="account-panel" ${framed ? 'class="card"' : ""}><h2>微信账号</h2><div class="account-summary"><div><span class="label">微信当前登录</span><strong id="wechat-current-account">${escape(r?.current?.label || "尚未识别，请登录微信后刷新")}</strong></div><div><span class="label">NoteBridge 已连接</span><strong id="project-selected-account">${escape(r?.selected?.label || "尚未连接")}</strong></div></div><p id="account-message" class="${r?.matches_current ? "success" : "note"}">${escape(r?.message || "正在识别账号…")}</p><div class="actions">${r?.code === "unavailable" ? '<button id="account-privacy" class="primary">允许读取微信资料</button>' : ""}${(!hasSaved || !r?.current) && !canConfigureAccount() && page === "setup" ? `<button id="first-connect" class="${r?.code === "unavailable" ? "" : "primary"}">${hasSaved ? "检查微信连接" : "首次连接微信"}</button>` : ""}${r?.current && (hasSaved || page !== "setup") ? `<button id="use-current-account" class="${r.matches_current || page === "keytool" ? "" : "primary"}">${r.current.credential_saved ? (r.matches_current ? "验证当前账号" : "验证并切换到当前账号") : "连接当前账号"}</button>` : ""}<button id="refresh-accounts" class="text-button">刷新账号</button></div><details id="account-list"><summary id="account-toggle">已发现的账号 · ${rows.length}</summary>${rows.map((a, i) => `<div class="row"><div class="grow"><strong>${escape(a.label)}</strong><p class="muted">${a.active ? "微信当前登录 · " : "历史账号资料 · "}${a.credential_saved ? "密钥已保存" : "尚无密钥"}${a.selected ? " · 本项目正在使用" : ""}</p></div><div class="actions"><button data-name-index="${i}" class="text-button">显示名称</button><button data-account-index="${i}" ${a.active ? "" : "disabled"}>${a.credential_saved ? "验证并使用" : "连接此账号"}</button></div></div>`).join("")}<p class="muted">首次连接可在取钥向导选择历史账号，或登录其他账号。每个账号分别保存凭据。</p></details></section>`;
 }
 function updateAccountActions() {
   const matches = accountReport?.matches_current === true;
-  if ($("#find-chats")) $("#find-chats").disabled = !matches;
+  const configurable = canConfigureAccount();
+  if ($("#find-chats")) $("#find-chats").disabled = !configurable;
+  if ($("#setup-login-status")) $("#setup-login-status").hidden = matches;
   if ($("#finish-setup"))
     $("#finish-setup").disabled =
       !matches || !settings.chat_id || !settings.feishu_chat_id;
@@ -294,7 +310,7 @@ function updateAccountActions() {
     .forEach((b) => (b.disabled = !matches || !settings.chat_id));
   document
     .querySelectorAll("[data-step]")
-    .forEach((b) => (b.disabled = Number(b.dataset.step) > 1 && !matches));
+    .forEach((b) => (b.disabled = Number(b.dataset.step) > 1 && !configurable));
   if ($("#capture-start") && !activeCaptureId)
     $("#capture-start").disabled = !captureReadiness?.ready;
 }
@@ -618,14 +634,19 @@ const setupStages = [
   "接入飞书",
   "开始运行",
 ];
+function canConfigureAccount() {
+  return (
+    accountReport?.can_configure ?? accountReport?.matches_current === true
+  );
+}
 function defaultSetupStep() {
-  if (!accountReport?.matches_current) return 1;
+  if (!canConfigureAccount()) return 1;
   if (!settings.chat_id) return 2;
   if (!settings.feishu_chat_id) return 3;
   return 5;
 }
 function setSetupStep(step) {
-  if (step > 1 && !accountReport?.matches_current) return;
+  if (step > 1 && !canConfigureAccount()) return;
   rememberSetupDraft();
   setupStep = step;
   render();
@@ -680,7 +701,7 @@ function bindTransportFields() {
 }
 function setup() {
   if (!setupStep) setupStep = defaultSetupStep();
-  const connected = accountReport?.matches_current === true;
+  const connected = canConfigureAccount();
   if (!connected) setupStep = 1;
   const done = [
     connected,
@@ -702,7 +723,7 @@ function setup() {
       content += `<p class="muted">首次连接会引导你检查环境、授权取钥并恢复官方微信。完成后凭据保存在本机，日常读取无需重复取钥。</p><div class="actions"><button id="existing-credential" class="text-button">已有密钥或备份</button></div>`;
     } else {
       content +=
-        `<p class="muted">当前账号已连接。接下来选择一个会话，用新消息验证完整流程。</p>` +
+        `<p class="muted">此账号凭据已保存。接下来选择本地会话；开始监控前再确认微信登录状态。</p>` +
         stepFooter(null, 2, "选择微信会话");
     }
   } else if (setupStep === 2) {
@@ -742,10 +763,10 @@ function setup() {
         "确认配置，开始运行",
         "最后验证模型、费用记录和飞书投递，然后监听新消息。",
       ) +
-      `<div class="row"><span class="muted">微信会话</span><strong>${escape(settings.group_name || "尚未选择")}</strong></div><div class="row"><span class="muted">飞书接收群</span><strong>${escape(settings.feishu_chat_name || "尚未选择")}</strong></div><label class="check"><input id="send-enabled" type="checkbox" ${(setupDraft["send-enabled"] ?? settings.send_enabled) ? "checked" : ""}><span><strong>将回复建议自动发送到飞书</strong><small>关闭后仅保存本地草稿。建议内容请人工确认后回复客户。</small></span></label><details class="subsection"><summary>启动方式</summary><label class="check"><input id="autostart-monitor" type="checkbox" ${(setupDraft["autostart-monitor"] ?? settings.autostart_monitor) ? "checked" : ""}><span>打开 NoteBridge 后恢复监控</span></label><label class="check"><input id="login-start" type="checkbox" ${(setupDraft["login-start"] ?? state.login_installed) ? "checked" : ""}><span>登录 Mac 后在菜单栏启动</span></label></details><p class="note">测试会调用一次模型，并向已选飞书群发送一条测试消息。保持 Mac 微信登录、DSH 开启；开启自动投递前，请在工作台检查已有草稿。</p><div class="step-footer"><button id="step-back" class="text-button">← 上一步</button><button id="finish-setup" class="primary" ${settings.chat_id && settings.feishu_chat_id ? "" : "disabled"}>测试并开始运行</button></div><div class="actions"><button id="save-run" class="text-button">仅保存运行选项</button></div>`;
+      `<div class="row"><span class="muted">微信会话</span><strong>${escape(settings.group_name || "尚未选择")}</strong></div><div class="row"><span class="muted">飞书接收群</span><strong>${escape(settings.feishu_chat_name || "尚未选择")}</strong></div><label class="check"><input id="send-enabled" type="checkbox" ${(setupDraft["send-enabled"] ?? settings.send_enabled) ? "checked" : ""}><span><strong>将回复建议自动发送到飞书</strong><small>关闭后仅保存本地草稿。建议内容请人工确认后回复客户。</small></span></label><details class="subsection"><summary>启动方式</summary><label class="check"><input id="autostart-monitor" type="checkbox" ${(setupDraft["autostart-monitor"] ?? settings.autostart_monitor) ? "checked" : ""}><span>打开 NoteBridge 后恢复监控</span></label><label class="check"><input id="login-start" type="checkbox" ${(setupDraft["login-start"] ?? state.login_installed) ? "checked" : ""}><span>登录 Mac 后在菜单栏启动</span></label></details><p class="note">测试会调用一次模型，并向已选飞书群发送一条测试消息。保持 Mac 微信登录、DSH 开启；开启自动投递前，请在工作台检查已有草稿。</p><div class="step-footer"><button id="step-back" class="text-button">← 上一步</button><button id="finish-setup" class="primary" ${accountReport?.matches_current && settings.chat_id && settings.feishu_chat_id ? "" : "disabled"}>测试并开始运行</button></div><div class="actions"><button id="save-run" class="text-button">仅保存运行选项</button></div>`;
   }
   $("#content").innerHTML =
-    `<div class="setup-layout"><ol class="steps" aria-label="接入进度">${setupStages.map((name, i) => `<li><button class="step ${setupStep === i + 1 ? "current" : done[i] ? "done" : ""}" data-step="${i + 1}" ${setupStep === i + 1 ? 'aria-current="step"' : ""} ${!connected && i > 0 ? "disabled" : ""}><span class="step-number">${done[i] && setupStep !== i + 1 ? "✓" : i + 1}</span><span>${name}</span></button></li>`).join("")}</ol>${setupStep > 1 ? `<div class="account-strip"><span>当前账号 · ${escape(accountReport.current?.label)}</span><button id="change-account" class="text-button">管理账号</button></div>` : ""}<section class="card setup-task">${content}</section><p class="setup-help">遇到问题？<a href="https://github.com/CalWade/wx-watcher/blob/main/docs/FIRST_RUN.md" target="_blank" rel="noreferrer">查看接入指南 ↗</a></p></div>`;
+    `<div class="setup-layout"><ol class="steps" aria-label="接入进度">${setupStages.map((name, i) => `<li><button class="step ${setupStep === i + 1 ? "current" : done[i] ? "done" : ""}" data-step="${i + 1}" ${setupStep === i + 1 ? 'aria-current="step"' : ""} ${!connected && i > 0 ? "disabled" : ""}><span class="step-number">${done[i] && setupStep !== i + 1 ? "✓" : i + 1}</span><span>${name}</span></button></li>`).join("")}</ol>${setupStep > 1 ? `<div class="account-strip"><span>配置账号 · ${escape(accountReport.selected?.label)}</span><button id="change-account" class="text-button">管理账号</button></div>` : ""}<section class="card setup-task">${setupStep > 1 ? `<div id="setup-login-status" class="note" ${accountReport?.matches_current ? "hidden" : ""}><p>凭据已保存，可继续配置本地会话。开始监控前，请在官方微信中登录此账号；无需重新取钥。</p><button id="refresh-setup-account" class="text-button">刷新登录状态</button></div>` : ""}${content}</section><p class="setup-help">遇到问题？<a href="https://github.com/CalWade/wx-watcher/blob/main/docs/FIRST_RUN.md" target="_blank" rel="noreferrer">查看接入指南 ↗</a></p></div>`;
   bindAccountPanel();
   document
     .querySelectorAll("[data-step]")
@@ -753,6 +774,11 @@ function setup() {
   bind("step-back", () => setSetupStep(setupStep - 1));
   bind("step-next", () => setSetupStep(setupStep + 1));
   bind("change-account", () => setSetupStep(1));
+  bind("refresh-setup-account", async () => {
+    rememberSetupDraft();
+    await refresh();
+    render();
+  });
   bind("existing-credential", () => {
     pendingAccount = accountReport?.current || null;
     navigate("keytool");
@@ -903,7 +929,7 @@ function keytool() {
   const root = report
     ? report.db_root
     : target?.db_root ||
-      (accountReport?.matches_current || captureProgress?.phase === "completed"
+      (canConfigureAccount() || captureProgress?.phase === "completed"
         ? profile?.db_root
         : "") ||
       "";
@@ -931,7 +957,7 @@ function keytool() {
         ${report?.ready ? '<p class="note">这一步会备份微信、临时重签并连接调试器，结束后恢复官方客户端。需要系统授权；首次取钥无法保证零风控风险。</p>' : ""}
       </div>
       <div id="capture-live" ${active || (captureProgress && !completed) ? "" : "hidden"}><p id="capture-progress" class="note" role="status">${escape(captureProgress?.message || "正在准备，请稍候…")}</p><div class="actions"><button id="capture-login-ready" class="primary" hidden>我已停在登录页，准备监听</button><button id="capture-cancel" class="text-button" disabled>取消并恢复</button></div></div>
-      ${targetIsSaved ? `<div id="credential-result" class="${completed ? "" : "subsection"}"><div class="row"><strong>${escape(profile.label)}</strong><span class="pill ok">Keychain 已保存</span></div><p class="muted">${escape(profile.verification?.verified || 0)} / ${escape(profile.verification?.total || 0)} 份数据库已验证。请在恢复后的官方微信中正常登录，再继续。</p><div class="actions"><button id="continue-setup" class="primary">下一步：选择会话</button>${button("验证当前凭据", "verify-key")}</div>${!active && !completed && !requestRecapture ? '<div class="subsection"><button id="recapture" class="text-button">需要重新获取凭据？</button><button id="connect-other-account" class="text-button">连接其他账号</button></div>' : ""}</div>` : ""}
+      ${targetIsSaved ? `<div id="credential-result" class="${completed ? "" : "subsection"}"><div class="row"><strong>${escape(profile.label)}</strong><span class="pill ok">Keychain 已保存</span></div><p class="muted">${escape(profile.verification?.verified || 0)} / ${escape(profile.verification?.total || 0)} 份数据库已验证。可以继续选择本地会话；开始监控前再登录恢复后的官方微信，无需重新取钥。</p><div class="actions"><button id="continue-setup" class="primary">下一步：选择会话</button>${button("验证当前凭据", "verify-key")}</div>${!active && !completed && !requestRecapture ? '<div class="subsection"><button id="recapture" class="text-button">需要重新获取凭据？</button><button id="connect-other-account" class="text-button">连接其他账号</button></div>' : ""}</div>` : ""}
     </section>
     <details class="card" id="permission-options"><summary>权限帮助</summary><p class="muted">在系统设置中允许 NoteBridge 读取微信资料。列表中没有应用时，将权限帮助窗口中的图标拖入列表，开启后点击「重新连接」。</p><div class="actions"><button id="open-privacy">完整磁盘访问设置</button><button id="open-app-management">App 管理设置</button></div></details>
   </div></div>

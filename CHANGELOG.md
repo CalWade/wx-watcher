@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.5
+
+- Keep setup available after a successful capture when the restored official WeChat client has not logged in again. Saved local conversations can be searched and selected without another capture.
+- Separate local configuration readiness from live-account confirmation. Starting monitoring still requires a matching login; confirmed account changes and ambiguous logins cannot reuse the selected account's conversations.
+- Preserve setup progress and unsaved input during temporary login-detection loss. Show the configured account and an inline login reminder with refresh, instead of returning to the first step.
+
 ## 0.4.4
 
 - Show local account remarks or the verified self contact's nickname and WeChat ID instead of database directory names. Keep the internal identifier in account details and use a suffix when no name is available.

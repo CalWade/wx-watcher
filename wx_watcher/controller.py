@@ -178,10 +178,22 @@ class Controller:
         matches = bool(
             current and selected and current["db_root"] == selected["db_root"]
         )
+        can_configure = bool(
+            not unavailable
+            and selected
+            and selected["credential_saved"]
+            and selected["available"]
+            and (matches or not current_rows)
+        )
         if unavailable:
             code, message = (
                 "unavailable",
                 "无法读取微信账号资料。已保存的账号仍列在下方；请允许完整磁盘访问权限，重新连接后刷新。",
+            )
+        elif can_configure and not current:
+            code, message = (
+                "local_ready",
+                "凭据已保存，可继续选择本地会话并完成配置。开始监控前，请在官方微信中登录此账号并刷新状态；无需重新取钥。",
             )
         elif not current:
             code, message = (
@@ -206,6 +218,7 @@ class Controller:
             "current": current,
             "selected": selected,
             "matches_current": matches,
+            "can_configure": can_configure,
             "accounts": list(rows.values()),
         }
 
@@ -267,6 +280,21 @@ class Controller:
                 "微信当前登录账号与本项目选择的账号不同。请在账号区域连接或切换当前账号，不能沿用旧账号配置。"
             )
 
+    def require_local_account(self):
+        """Saved local data can be configured while the restored client is logged out."""
+        from .discovery import active_roots
+
+        profile = self.state.profile()
+        if not profile.get("key_ref"):
+            raise ValueError("请先连接微信账号并验证密钥")
+        roots = active_roots()
+        if len(roots) > 1:
+            raise ValueError("识别到多个登录账号，请确认要使用的账号后刷新")
+        if roots and Path(roots[0]).resolve() != Path(profile["db_root"]).resolve():
+            raise ValueError(
+                "微信当前登录账号与本项目选择的账号不同。请在账号区域连接或切换当前账号，不能沿用旧账号配置。"
+            )
+
     def reader(self):
         p = self.state.profile()
         config = Config(
@@ -281,7 +309,7 @@ class Controller:
         return self.preview_reader
 
     def conversations(self, query=""):
-        self.require_current_account()
+        self.require_local_account()
         reader = self.reader()
         rows = reader.rows(
             reader.config.db_root / "contact/contact.db",
@@ -580,6 +608,8 @@ class Controller:
                         send_enabled=False,
                         autostart_monitor=False,
                     )
+            if not switching and {"chat_id", "group_name"}.intersection(values):
+                self.require_local_account()
             previous = self.state.load()
             if any(
                 k in values and values[k] != previous[k]
@@ -802,7 +832,7 @@ class Controller:
         if operation == "diagnostics":
             s = self.state.load()
             return {
-                "version": "0.4.4",
+                "version": "0.4.5",
                 "environment": self.doctor(),
                 "services": self.services.status(),
                 "profile_count": len(s["profiles"]),

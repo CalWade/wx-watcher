@@ -31,7 +31,8 @@ func requireSystem(_ executable: String, _ arguments: [String], code: String = "
     }
 }
 func lldbExecutable() -> String? {
-    ["/Applications/Xcode.app/Contents/Developer/usr/bin/lldb", "/usr/bin/lldb"]
+    // /usr/bin/lldb is an installer shim on a fresh Mac. Do not launch it during a read-only check.
+    ["/Applications/Xcode.app/Contents/Developer/usr/bin/lldb", "/Library/Developer/CommandLineTools/usr/bin/lldb"]
         .first(where: { FileManager.default.isExecutableFile(atPath: $0) })
 }
 func probeFileAccess(_ path: String, write: Bool = false) -> (allowed: Bool, error: Int32) {
@@ -51,18 +52,23 @@ func capturePreflight(dbRoot: String? = nil, checkApplicationAccess: Bool = fals
     let details = (try? system("/usr/bin/codesign", ["-dv", "--verbose=2", app.path]).1) ?? ""
     let supported = version == "4.1.13" && build == "269630"
     let debugger = lldbExecutable() ?? ""
-    let debuggerVersion = (try? system(debugger, ["--version"]).1) ?? ""
+    let debuggerProbe = debugger.isEmpty ? nil : try? system(debugger, ["--version"])
+    let debuggerVersion = debuggerProbe?.1 ?? ""
     let match = debuggerVersion.range(of: #"lldb-\d+"#, options: .regularExpression)
     let debuggerMajor = match.flatMap { Int(debuggerVersion[$0].dropFirst(5)) } ?? 0
     let os = ProcessInfo.processInfo.operatingSystemVersion
-    let compatible = os.majorVersion < 27 || debuggerMajor >= 2000
+    let compatible = debuggerProbe?.0 == 0 && debuggerMajor > 0 && (os.majorVersion < 27 || debuggerMajor >= 2000)
     let testedOS = os.majorVersion == 27 && os.minorVersion == 0
     #if arch(arm64)
     let testedArchitecture = true
     #else
     let testedArchitecture = false
     #endif
-    var result: [String: Any] = ["ok": true, "wechat_version": version, "wechat_build": build, "tested_build": supported,
+    let dataAccess = probeFileAccess(FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files").path)
+    var result: [String: Any] = ["ok": true, "wechat_installed": bundle != nil,
+        "data_directory_readable": dataAccess.allowed, "data_directory_errno": dataAccess.error,
+        "wechat_version": version, "wechat_build": build, "tested_build": supported,
         "official_signature": details.contains("TeamIdentifier=5A4RE8SF68"),
         "hardened_runtime": details.contains("0x10000(runtime)"),
         "lldb": debugger, "lldb_version": debuggerVersion, "debugger_compatible": compatible,
@@ -75,7 +81,7 @@ func capturePreflight(dbRoot: String? = nil, checkApplicationAccess: Bool = fals
         result["database_access_errno"] = access.error
         if !access.allowed {
             result["ready"] = false
-            result["permission_hint"] = "实际取钥工具尚不能读取微信数据库。请为当前安装版开启完整磁盘访问权限，重新打开应用后检查；已有授权可能因开发版签名变化失效。"
+            result["permission_hint"] = databaseAccessHint(access.error)
             return result
         }
     }
@@ -90,6 +96,16 @@ func capturePreflight(dbRoot: String? = nil, checkApplicationAccess: Bool = fals
         }
     }
     return result
+}
+
+func databaseAccessHint(_ error: Int32) -> String {
+    if error == ENOENT || error == ENOTDIR {
+        return "尚未生成本地微信消息资料。请先正常登录官方 Mac 微信，向文件传输助手发送一条连接测试消息，再回到向导重新检查。"
+    }
+    if error == EPERM || error == EACCES {
+        return "实际取钥工具尚不能读取微信数据库。请为当前安装版开启完整磁盘访问权限，点击应用底部「重新连接」后检查；已有授权可能因开发版签名变化失效。"
+    }
+    return "微信数据库暂时无法读取（系统错误 \(error)）。请检查账号目录是否存在，再重新检查；不要反复取钥。"
 }
 
 final class CaptureJournal: @unchecked Sendable {
@@ -136,8 +152,10 @@ func validateJobDirectory(_ path: String) throws -> (URL, uid_t) {
     let uid = uid_t(number.uint32Value)
     guard uid >= 500, let user = getpwuid(uid) else { throw ToolError.invalid("invalid_capture_owner") }
     let home = String(cString: user.pointee.pw_dir)
-    let prefix = home + "/Library/Application Support/WXWatcher/keytool/jobs/"
-    guard dir.path == prefix + dir.lastPathComponent else { throw ToolError.invalid("unsafe_capture_directory") }
+    let prefixes = [home + "/Library/Application Support/NoteBridge/setup/jobs/",
+                    home + "/Library/Application Support/WXWatcher/keytool/jobs/"]
+    guard prefixes.contains(where: { dir.path == $0 + dir.lastPathComponent })
+    else { throw ToolError.invalid("unsafe_capture_directory") }
     return (dir, uid)
 }
 
@@ -207,10 +225,15 @@ func currentlyOpenDatabaseRoots() -> Set<String> {
 
 func runCaptureJob(_ path: String, recoverOnly: Bool = false) throws {
     guard geteuid() == 0 else { throw ToolError.invalid("capture_requires_system_authorization") }
-    let lockFD = open("/var/run/io.github.calwade.wx-keytool.lock", O_CREAT | O_RDWR | O_NOFOLLOW, 0o600)
-    guard lockFD >= 0 else { throw ToolError.invalid("capture_lock_failed") }
-    defer { close(lockFD) }
-    guard flock(lockFD, LOCK_EX | LOCK_NB) == 0 else { throw ToolError.invalid("another_capture_job_is_running") }
+    var lockFDs: [Int32] = []
+    defer { for fd in lockFDs { close(fd) } }
+    // The legacy lock prevents concurrent restores by a still-installed 0.2 tool.
+    for name in ["io.github.calwade.wx-keytool.lock", "io.github.calwade.notebridge.setup.lock"] {
+        let fd = open("/var/run/" + name, O_CREAT | O_RDWR | O_NOFOLLOW, 0o600)
+        guard fd >= 0 else { throw ToolError.invalid("capture_lock_failed") }
+        guard flock(fd, LOCK_EX | LOCK_NB) == 0 else { close(fd); throw ToolError.invalid("another_capture_job_is_running") }
+        lockFDs.append(fd)
+    }
     let (directory, uid) = try validateJobDirectory(path)
     let journal = CaptureJournal(directory: directory, uid: uid)
     let app = "/Applications/WeChat.app"
@@ -326,8 +349,8 @@ func runCaptureJob(_ path: String, recoverOnly: Bool = false) throws {
             guard signature.contains("TeamIdentifier=5A4RE8SF68") else { throw ToolError.invalid("backup_signature_invalid") }
             try requireSystem("/usr/bin/codesign", ["--verify", "--deep", "--strict", backup])
             try stopOwnedWeChat(uid)
-            let staging = URL(fileURLWithPath: "/Applications/.WXWatcher-restore-\(directory.lastPathComponent).app")
-            let previous = URL(fileURLWithPath: "/Applications/.WXWatcher-previous-\(UUID().uuidString).app")
+            let staging = URL(fileURLWithPath: "/Applications/.NoteBridge-restore-\(directory.lastPathComponent).app")
+            let previous = URL(fileURLWithPath: "/Applications/.NoteBridge-previous-\(UUID().uuidString).app")
             if FileManager.default.fileExists(atPath: staging.path) { try FileManager.default.removeItem(at: staging) }
             try requireSystem("/usr/bin/ditto", [backup, staging.path])
             try replaceApplication(application: URL(fileURLWithPath: app), staged: staging, previous: previous) { url in

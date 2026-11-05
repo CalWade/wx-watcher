@@ -1,4 +1,6 @@
-# WX Watcher
+# NoteBridge
+
+The GitHub repository remains **wx-watcher**. See [migration and compatibility](docs/MIGRATION.md) when upgrading from WX Watcher.
 
 A local-first macOS assistant: read selected personal WeChat conversations from
 local encrypted databases, draft replies through your existing DSH model channel,
@@ -20,12 +22,12 @@ git clone https://github.com/CalWade/wx-watcher.git
 cd wx-watcher
 uv sync --frozen
 swift build --package-path native -c release
-codesign --force --sign - native/.build/release/wx-keytool
-uv run wx-watcher desktop
+codesign --force --sign - native/.build/release/notebridge-access
+uv run notebridge desktop
 ```
 
 Install SQLCipher and the appropriate Apple developer tools first.
-[Installation](docs/INSTALL.md) · [Acquisition](docs/KEYTOOL.md) · [DSH](docs/DSH.md) ·
+[First run with UI examples (Chinese)](docs/FIRST_RUN.md) · [Installation](docs/INSTALL.md) · [Acquisition](docs/KEYTOOL.md) · [DSH](docs/DSH.md) ·
 [Feishu](docs/FEISHU.md) · [Operations](docs/OPERATIONS.md) · [API](docs/API.md)
 
 The [README](README.md) lists actually tested versions. Other builds need explicit

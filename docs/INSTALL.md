@@ -1,9 +1,13 @@
 # 安装与首次运行
 
+从 0.2 升级：先阅读 [NoteBridge 更名与数据迁移](MIGRATION.md)，已有密钥继续复用。
+
+第一次使用请从 [新机器完整指南（含界面示例）](FIRST_RUN.md) 开始。主应用已包含取钥，无需同时安装 Setup。
+
 ## 1. 确认适用范围
 
 目前面向 Apple Silicon Mac。原生界面的源码目标是 macOS 14；实际应用最低版本取所有打包依赖的最大值。
-本机发布的 0.2.0 安装包因 SQLCipher/OpenSSL 依赖要求 **macOS 27.0+**，
+本机发布的 0.3.0 安装包因 SQLCipher/OpenSSL 依赖要求 **macOS 27.0+**，
 安装包 Info.plist 与 build-manifest.json 会如实记录。真实整合组合在 README 中列出。
 首次取钥只放行已验证的微信构建；数据库读取、应用能启动和取钥成功是不同的验收项。
 请只连接本人账号或有明确处理权限的数据。
@@ -11,7 +15,7 @@
 ## 2. 使用 Mac 应用
 
 从仓库 Releases 下载与你芯片对应的构建，核对发布页 SHA-256。
-将 `WX Watcher.app` 拖入「应用程序」后打开；独立凭据用途可打开 `WX Keytool.app`。
+将 `NoteBridge.app` 拖入「应用程序」后打开；独立凭据用途可打开 `NoteBridge Setup.app`。
 两个入口使用同一个本机凭据与账号配置，不需要复制密钥。
 
 请检查发布页的签名状态。Developer ID 签名与公证需要维护者配置凭据；临时签名构建
@@ -32,8 +36,8 @@ git clone https://github.com/CalWade/wx-watcher.git
 cd wx-watcher
 uv sync --frozen
 swift build --package-path native -c release
-codesign --force --sign - native/.build/release/wx-keytool
-uv run wx-watcher desktop
+codesign --force --sign - native/.build/release/notebridge-access
+uv run notebridge desktop
 ```
 
 上面的临时签名使本地构建的凭据工具具有代码身份；未签名工具可能被 Keychain 拒绝。
@@ -47,10 +51,10 @@ uv run wx-watcher desktop
 
 ## 4. 完成向导
 
-1. 点击「自动识别并连接」；自动完成可用步骤，问题在同页逐项提示。
-2. 在「微信凭据」选择账号 `db_storage` 目录。可先点击「识别本机账号」。
-3. 已有密钥：选择文件，点击「验证并存入 Keychain」。文件应仅本人可读写，权限 600。
-4. 无密钥：[按照取钥教程](KEYTOOL.md)完成一次性捕获与恢复。
+1. 新机首页点击「首次连接微信（没有密钥）」。先正常登录官方微信并生成本地消息资料，再点检查。
+2. 向导自动识别账号并逐项检查；需要手动选择账号时展开高级选项。
+3. 已有密钥：在高级选项选择文件，点击「验证并存入 Keychain」。文件应仅本人可读写，权限 600。
+4. 无密钥：[按照新机指南](FIRST_RUN.md)完成一次性捕获与恢复，再点「下一步：选择会话」。
 5. 回到「连接与配置」搜索群名，选择准确会话。初次建议用文件传输助手。
 6. [接入 DSH](DSH.md)，测试模型与费用记录。
 7. [接入飞书](FEISHU.md)，选择测试群，试发并回读。
@@ -61,10 +65,10 @@ uv run wx-watcher desktop
 系统隐私权限、管理员授权和 Keychain 权限不同。缺少权限时按界面明确提示处理；
 **新安装应用不继承终端、Codex 或旧版签名的完整磁盘访问权限。**
 原生应用会对所选微信目录进行访问检测，并尝试触发系统登记；本机 macOS 27 未验证自动列出成功。在「微信凭据」点击系统数据访问设置，
-找到 WX Watcher 后开启开关。如果系统未自动列出，可将应用窗口底部的原生图标直接拖入权限列表；不需要寻找安装路径。
-也可用系统 `+` 选择 `/Applications/WX Watcher.app`。
+找到 NoteBridge 后开启开关。如果系统未自动列出，可将应用窗口底部的原生图标直接拖入权限列表；不需要寻找安装路径。
+也可用系统 `+` 选择 `/Applications/NoteBridge.app`。
 开启后点击应用窗口底部「重新连接」，系统会停止自有后台并重新打开应用。
-只使用独立 Keytool 时对实际运行的 Keytool 授权。
+只使用独立 Setup 时对实际运行的 Setup 授权。
 这一步是系统隐私授权；不需要重新获取数据库密钥。
 已有权限和有效密钥会直接复用。工具不会读取或保存系统密码。
 
@@ -80,7 +84,7 @@ uv run wx-watcher desktop
 | 现象 | 处理 |
 | --- | --- |
 | 找不到 SQLCipher | 确认命令在 PATH，或旧版配置显式指定 `sqlcipher`；应用包需检查引擎是否完整 |
-| 找不到 wx-keytool | 源码用户先构建 native 包；应用用户重新校验构建完整性 |
+| 找不到 notebridge-access | 源码用户先构建 native 包；应用用户重新校验构建完整性 |
 | 微信目录读取被拒绝 | 在系统隐私设置中授权实际运行的应用；管理员权限不能替代隐私授权 |
 | Keychain 拒绝访问 | 使用稳定签名的工具，在系统提示中确认；不要重新取钥来解决钥匙串问题 |
 | DSH 未就绪 | 打开 DSH，安装 cost-meter 与桥接，查看 DSH 插件日志 |

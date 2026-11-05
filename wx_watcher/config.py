@@ -14,7 +14,8 @@ def default_sqlcipher() -> str:
     if getattr(sys, "frozen", False) and bundled.is_file():
         return str(bundled)
     return (
-        os.environ.get("WX_SQLCIPHER", "")
+        os.environ.get("NOTE_BRIDGE_SQLCIPHER", "")
+        or os.environ.get("WX_SQLCIPHER", "")
         or shutil.which("sqlcipher")
         or "/opt/homebrew/bin/sqlcipher"
     )

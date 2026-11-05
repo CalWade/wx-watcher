@@ -407,6 +407,60 @@ a {
   padding: 9px 0;
   border-bottom: 1px solid var(--line);
 }
+.journey {
+  list-style: none;
+  counter-reset: journey;
+  padding: 0;
+}
+.journey li {
+  counter-increment: journey;
+  position: relative;
+  padding: 10px 10px 10px 40px;
+  border-radius: 8px;
+  margin: 4px 0;
+}
+.journey li::before {
+  content: counter(journey);
+  position: absolute;
+  left: 8px;
+  top: 11px;
+  width: 23px;
+  height: 23px;
+  text-align: center;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  font-size: 12px;
+}
+.journey li.current {
+  background: #e7f0dd;
+  border-left: 3px solid var(--green);
+}
+.journey span {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+}
+.readiness {
+  border-bottom: 1px solid var(--line);
+  padding: 14px 0;
+}
+.readiness p {
+  margin: 4px 0 0;
+  font-size: 12px;
+}
+.readiness.blocked strong {
+  color: var(--orange);
+}
+.readiness.passed strong {
+  color: var(--green);
+}
+summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+details.card[open] summary {
+  margin-bottom: 18px;
+}
 @media (max-width: 900px) {
   aside {
     width: 180px;

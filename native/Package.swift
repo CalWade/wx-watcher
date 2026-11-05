@@ -2,19 +2,19 @@
 import PackageDescription
 
 let package = Package(
-    name: "WXWatcher", platforms: [.macOS(.v14)],
+    name: "NoteBridge", platforms: [.macOS(.v14)],
     products: [
-        .executable(name: "wx-keytool", targets: ["WXKeytool"]),
-        .executable(name: "wx-watcher-app", targets: ["WXWatcherApp"]),
+        .executable(name: "notebridge-access", targets: ["NoteBridgeAccess"]),
+        .executable(name: "notebridge-app", targets: ["NoteBridgeApp"]),
     ],
     targets: [
         .target(name: "GreenBubblesAcquire", path: "Vendor/Sources/GreenBubblesAcquire"),
-        .executableTarget(name: "WXKeytool", dependencies: ["GreenBubblesAcquire"],
+        .executableTarget(name: "NoteBridgeAccess", dependencies: ["GreenBubblesAcquire"],
                           linkerSettings: [.linkedFramework("Security")]),
-        .executableTarget(name: "WXWatcherApp", linkerSettings: [
+        .executableTarget(name: "NoteBridgeApp", linkerSettings: [
             .linkedFramework("AppKit"), .linkedFramework("WebKit")]),
         .testTarget(name: "GreenBubblesAcquireTests", dependencies: ["GreenBubblesAcquire"],
                     path: "Vendor/Tests/GreenBubblesAcquireTests"),
-        .testTarget(name: "WXKeytoolTests", dependencies: ["WXKeytool"]),
+        .testTarget(name: "NoteBridgeAccessTests", dependencies: ["NoteBridgeAccess"]),
     ]
 )

@@ -12,7 +12,7 @@
 Local changes: configurable LLDB path, stop-on-exec/quit settings, genuine setup
 milestones, 30-second setup deadline, detach-first cleanup, SIGPIPE protection,
 stricter KDF parameter filtering, cancellation, and line-based ordering tests.
-WX Watcher's Keychain bridge, encrypted backup, privileged recovery transaction,
+NoteBridge's Keychain bridge, encrypted backup, privileged recovery transaction,
 desktop shell and application orchestration are separate project code.
 
 ## wechat-decrypt

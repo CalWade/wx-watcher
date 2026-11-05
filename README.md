@@ -1,11 +1,13 @@
-# WX Watcher
+# NoteBridge
+
+GitHub 仓库名保留 **wx-watcher**。从 WX Watcher 升级请看 [更名与数据迁移](docs/MIGRATION.md)。
 
 **普通微信本地消息 → DSH 回复建议 → 飞书内部群。**
 
 macOS 本地消息助手：图形配置向导、菜单栏应用、独立微信凭据工具、只读消息 API，
 以及可恢复的回复建议任务。建议送达内部飞书群，由同事确认后回复客户。
 
-[English](README.en.md) · [安装](docs/INSTALL.md) · [微信取钥](docs/KEYTOOL.md) ·
+[English](README.en.md) · [新机从零指南](docs/FIRST_RUN.md) · [安装](docs/INSTALL.md) · [微信取钥](docs/KEYTOOL.md) ·
 [DSH](docs/DSH.md) · [飞书](docs/FEISHU.md) · [运维](docs/OPERATIONS.md) ·
 [开发](docs/DEVELOPMENT.md) · [安全与隐私](SECURITY.md)
 
@@ -13,7 +15,7 @@ macOS 本地消息助手：图形配置向导、菜单栏应用、独立微信�
 
 | 目标 | 入口 |
 | --- | --- |
-| 第一次使用 | [安装与首次运行](docs/INSTALL.md) |
+| 第一次使用 | [新机器从取钥到运行（含界面示例）](docs/FIRST_RUN.md) |
 | 已有密钥 | 应用 → 微信凭据 → 验证并存入 Keychain |
 | 第一次取钥 | [取钥向导及恢复](docs/KEYTOOL.md) |
 | 使用现有模型渠道 | [DSH 与 cost-meter](docs/DSH.md) |
@@ -22,14 +24,14 @@ macOS 本地消息助手：图形配置向导、菜单栏应用、独立微信�
 
 ## 使用流程
 
-1. 打开应用，点击「自动识别并连接」。系统识别账号、复用凭据并准备 DSH/费用插件和飞书连接。
-2. 连接微信：导入已有密钥，或跟随独立取钥向导。
+1. 新机打开 NoteBridge，点击「首次连接微信（没有密钥）」，完成逐项检查和取钥向导；已有凭据可直接验证复用。
+2. 等待数据库验证、官方客户端恢复及 Keychain 保存，再点「下一步：选择会话」。回配置页可自动识别其余本机连接。
 3. 选择准确的微信会话，配置业务资料和回复规则。
 4. 已有 DSH 模型渠道和费用插件会复用；缺少费用插件时由已安装的 Desktop 补齐。
 5. 选择飞书接收群，点击「测试全链路并启动」。
 6. 通过菜单栏管理后台运行，可同时开启登录启动。
 
-这是当前首个开源预发布版本，真实验证范围见 [验收记录](docs/VALIDATION.md)。
+当前仍为开源预发布版本，真实验证范围见 [验收记录](docs/VALIDATION.md)。
 
 首次扫描建立历史基线，后续处理新增事件。支持连续消息合并、持久化任务与调用上限。
 模型失败或投递结果不确定时进入待核对状态，避免无限自动重试。
@@ -58,7 +60,7 @@ flowchart LR
 
 | 项目 | 当前范围 |
 | --- | --- |
-| 应用平台 | Apple Silicon；本机发布的 0.2.0 安装包要求 macOS 27.0+ |
+| 应用平台 | Apple Silicon；本机发布的 0.3.0 安装包要求 macOS 27.0+ |
 | 真实已验证组合 | macOS 27.0、微信 4.1.13（269630）、DSH NEXT 2.0.19-next |
 | 自动取钥 | 仅放行已验证微信构建；其他环境可先导入密钥验证读取 |
 | 数据库 | 当前 Mac 微信 SQLCipher4 布局，文本及部分引用/卡片文本 |
@@ -79,8 +81,8 @@ git clone https://github.com/CalWade/wx-watcher.git
 cd wx-watcher
 uv sync --frozen
 swift build --package-path native -c release
-codesign --force --sign - native/.build/release/wx-keytool
-uv run wx-watcher desktop
+codesign --force --sign - native/.build/release/notebridge-access
+uv run notebridge desktop
 ```
 
 [完整安装步骤](docs/INSTALL.md)。浏览器版与 Mac 应用使用同一界面；Mac 应用额外提供
@@ -105,8 +107,8 @@ Apple 凭据；临时签名产物必须明确标注，不要求用户关闭系�
 
 ## 数据与来源
 
-默认私有目录：`~/Library/Application Support/WXWatcher`；独立环境可设置
-`WX_WATCHER_HOME`。主密钥和飞书 App Secret 使用 macOS Keychain。
+默认私有目录：`~/Library/Application Support/NoteBridge`；独立环境可设置
+`NOTE_BRIDGE_HOME`。主密钥和飞书 App Secret 使用 macOS Keychain。
 配置、缓存、任务、日志与备份不进入 Git 仓库。
 
 本项目采用 [MIT](LICENSE)。取钥复用 GreenBubbles / wcdb-key-tool，WAL 快照和部分解析

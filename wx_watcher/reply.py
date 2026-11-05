@@ -20,6 +20,7 @@ from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+from .branding import dsh_storage
 from .config import Config
 from .source import private_dir
 
@@ -67,7 +68,7 @@ class ReplyConfig:
             reader_config=local(data.get("reader_config", "config/local.toml")),
             state_dir=local(data.get("state_dir", ".runtime/agent")),
             dsh_token_file=local(
-                data.get("dsh_token_file", "~/.dsh/storages/wx-reply-agent/token")
+                data.get("dsh_token_file", str(dsh_storage() / "token"))
             ),
             feishu_chat_id=data.get("feishu_chat_id", ""),
             feishu_chat_name=data.get("feishu_chat_name", ""),

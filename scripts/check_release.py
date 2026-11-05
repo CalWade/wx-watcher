@@ -16,6 +16,7 @@ REQUIRED = [
     "SECURITY.md",
     "CONTRIBUTING.md",
     "docs/INSTALL.md",
+    "docs/FIRST_RUN.md",
     "docs/KEYTOOL.md",
     "docs/DSH.md",
     "docs/FEISHU.md",

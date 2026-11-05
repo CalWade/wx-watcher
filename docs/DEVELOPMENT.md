@@ -4,8 +4,8 @@
 
 - `wx_watcher/`：读取、凭据访问、任务、集成、控制台后端。
 - `wx_watcher/assets/`：本地界面，无外部 CDN。
-- `native/Sources/WXKeytool`：Keychain、备份、取钥与恢复事务。
-- `native/Sources/WXWatcherApp`：Mac 窗口、WebView、菜单栏、原生选择器。
+- `native/Sources/NoteBridgeAccess`：Keychain、备份、取钥与恢复事务。
+- `native/Sources/NoteBridgeApp`：Mac 窗口、WebView、菜单栏、原生选择器。
 - `native/Vendor`：固定版本的上游取钥子集、原始许可。
 - `integrations/dsh/`：DSH 桥接的规范源。
 - `tests/`：合成数据与 API/恢复测试。
@@ -17,11 +17,11 @@
 ```sh
 uv sync --frozen --group build
 swift build --package-path native -c release
-codesign --force --sign - native/.build/release/wx-keytool
-uv run wx-watcher desktop
+codesign --force --sign - native/.build/release/notebridge-access
+uv run notebridge desktop
 ```
 
-独立开发数据可设置 `WX_WATCHER_HOME`。不要共用正在验证的真实账号任务目录。
+独立开发数据可设置 `NOTE_BRIDGE_HOME`。不要共用正在验证的真实账号任务目录。
 不要把当前机器的绝对路径、账号 ID、机器人 ID 或私有日志加入测试。
 
 ## 自动检查
@@ -52,10 +52,10 @@ uv run python scripts/build_macos.py
 创建 Mac 应用、压缩包、DMG 与 SHA-256。原始构建目录不会加入仓库。
 PyInstaller 的构建依赖在 uv.lock 中锁定。构建器扫描 Mach-O 最低系统版本，
 取所有依赖的最大值写入应用和发布清单，不能只根据 Swift 的 macOS 14 目标声明兼容。
-本机 0.2.0 构建的实际最低版本为 macOS 27.0。
+本机 0.3.0 构建的实际最低版本为 macOS 27.0。
 
 本地无 Developer ID 时采用临时签名，清楚标记未公证。
-正式签名通过构建环境的 `WX_CODESIGN_IDENTITY` 提供；公证凭据只放维护者本机或
+正式签名通过构建环境的 `NOTE_BRIDGE_CODESIGN_IDENTITY` 提供；公证凭据只放维护者本机或
 GitHub Actions secrets，不进入源码。发布必须核对公证实际结果。
 
 ## 真实验收

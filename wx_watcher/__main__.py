@@ -64,7 +64,13 @@ def main():
 
         del sys.argv[1]
         return reply_main()
-    if len(sys.argv) > 1 and sys.argv[1] in {"desktop", "setup", "service", "keytool"}:
+    if len(sys.argv) > 1 and sys.argv[1] in {
+        "desktop",
+        "setup",
+        "service",
+        "credentials",
+        "keytool",
+    }:
         from .desktop import main as desktop_main
 
         return desktop_main()

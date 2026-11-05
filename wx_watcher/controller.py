@@ -15,6 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from .appstate import AppState, atomic_text
+from .branding import BRIDGE_ID, LEGACY_BRIDGE_ID, VERSION, dsh_storage, login_file
 from .config import Config, default_sqlcipher
 from .credentials import native_request
 from .feishu import Feishu
@@ -27,7 +28,9 @@ class Controller:
     def __init__(self, directory=None):
         self.state = AppState(directory)
         self.services = Services(self.state)
-        self.pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="wx-setup")
+        self.pool = ThreadPoolExecutor(
+            max_workers=2, thread_name_prefix="notebridge-setup"
+        )
         self.jobs = {}
         self.lock = threading.RLock()
         self.preview_reader = None
@@ -81,7 +84,7 @@ class Controller:
         except PermissionError:
             checks["wechat_data_access"] = {
                 "readable": False,
-                "hint": "请在系统完整磁盘访问权限中允许实际运行的 WX Watcher 应用，然后退出并重新打开",
+                "hint": "请在系统完整磁盘访问权限中允许实际运行的 NoteBridge 应用，然后退出并重新打开",
             }
         except (OSError, ValueError):
             checks["wechat_data_access"] = {
@@ -101,8 +104,7 @@ class Controller:
     def dsh(self):
         return LocalAPI(
             self.state.load()["dsh_port"],
-            Path(os.environ.get("DSH_HOME", str(Path.home() / ".dsh")))
-            / "storages/wx-reply-agent/token",
+            dsh_storage() / "token",
         )
 
     def feishu(self):
@@ -238,10 +240,7 @@ class Controller:
             if "login_enabled" in data:
                 if type(data["login_enabled"]) is not bool:
                     raise ValueError("登录启动开关无效")
-                installed = (
-                    Path.home()
-                    / "Library/LaunchAgents/io.github.calwade.wx-watcher.plist"
-                ).exists()
+                installed = login_file().exists()
                 if installed != data["login_enabled"]:
                     self.perform(
                         "login-service",
@@ -405,7 +404,7 @@ class Controller:
             if not s["feishu_chat_id"]:
                 raise ValueError("请先选择飞书接收群")
             client = self.feishu()
-            text = "【WX Watcher 连通性测试】机器人接入正常。本消息由你在本地应用中点击测试后发送。"
+            text = "【NoteBridge 连通性测试】机器人接入正常。本消息由你在本地应用中点击测试后发送。"
             result = client.send(
                 s["feishu_chat_id"],
                 text,
@@ -456,7 +455,25 @@ class Controller:
         if operation == "install-dsh":
             return self.install_dsh()
         if operation == "start":
-            return self.services.start()
+            if self.state.load().get("brand_bridge_pending"):
+                try:
+                    with (
+                        Path(self.state.profile()["db_root"]) / "contact/contact.db"
+                    ).open("rb"):
+                        pass
+                except PermissionError:
+                    raise PermissionError(
+                        "请在完整磁盘访问权限中允许 NoteBridge，再点击重新连接；已有密钥无需重取。"
+                    ) from None
+                if not self.install_dsh().get("ready"):
+                    raise RuntimeError(
+                        "桥接迁移尚未就绪，请检查 DSH；原有模型渠道和费用账本已保留"
+                    )
+                self.state.update(brand_bridge_pending=False)
+            result = self.services.start()
+            if result.get("running"):
+                self.state.update(migration_resume_requested=False)
+            return result
         if operation == "stop":
             return self.services.stop()
         if operation == "task-review":
@@ -492,6 +509,10 @@ class Controller:
             return manage_login(
                 str(data.get("action", "status")), self.state.home, quiet=True
             )
+        if operation == "connection-check":
+            from .onboarding import check_first_connection
+
+            return check_first_connection(self, str(data.get("db_root", "")))
         if operation == "capture-preflight":
             from .keyflow import KeyFlow
 
@@ -525,7 +546,7 @@ class Controller:
         if operation == "diagnostics":
             s = self.state.load()
             return {
-                "version": "0.2.0",
+                "version": "0.3.0",
                 "environment": self.doctor(),
                 "services": self.services.status(),
                 "profile_count": len(s["profiles"]),
@@ -602,11 +623,15 @@ class Controller:
         profile = home / "profiles/desktop"
         if not profile.is_dir():
             raise ValueError("未找到 DSH desktop 配置，请先安装并启动支持的 DSH 版本")
+        from .migration import migrate_dsh_storage, validate_move
+
+        validate_move(home / "storages/wx-reply-agent", home / "storages/notebridge")
         source = Path(__file__).parent / "assets/dsh/index.mjs"
         if not source.exists():
             source = Path(__file__).resolve().parents[1] / "integrations/dsh/index.mjs"
         content = source.read_bytes()
         release = hashlib.sha256(content).hexdigest()[:16]
+        current = {}
         try:
             current = self.dsh().request("/v1/status")
             if (
@@ -631,16 +656,28 @@ class Controller:
         backup.write_text(old)
         backup.chmod(0o600)
         lines = old.splitlines(keepends=True)
+        owned_pattern = (
+            rf"\s*- id: (?:{re.escape(BRIDGE_ID)}|{re.escape(LEGACY_BRIDGE_ID)})\s*$"
+        )
+        matches = [i for i, line in enumerate(lines) if re.match(owned_pattern, line)]
+        if len(matches) > 1:
+            raise ValueError(
+                "同时发现多份新旧桥接条目，请先核对并只保留本项目条目；未修改其他配置"
+            )
         start = next(
-            (
-                i
-                for i, line in enumerate(lines)
-                if re.match(r"\s*- id: wx-reply-agent\s*$", line)
-            ),
+            (i for i, line in enumerate(lines) if re.match(owned_pattern, line)),
             None,
         )
         indent, end = 4, len(lines)
         if start is not None:
+            deadline = time.monotonic() + 30
+            while current.get("active", 0):
+                if time.monotonic() >= deadline:
+                    raise RuntimeError(
+                        "DSH 仍在完成已有回复任务，请完成后重试迁移；桥接尚未停用"
+                    )
+                time.sleep(0.5)
+                current = self.dsh().request("/v1/status")
             indent = len(lines[start]) - len(lines[start].lstrip())
             end = start + 1
             while end < len(lines):
@@ -651,7 +688,7 @@ class Controller:
             disabled = (
                 lines[:start]
                 + [
-                    " " * indent + "- id: wx-reply-agent\n",
+                    " " * indent + "- id: notebridge\n",
                     " " * (indent + 2) + "name: " + target.as_uri() + "\n",
                     " " * (indent + 2) + "disabled: true\n",
                 ]
@@ -672,8 +709,9 @@ class Controller:
                 raise RuntimeError(
                     "DSH 尚未卸载旧桥接。请在插件管理中停用本项目条目后重试；未重启其他会话。"
                 )
+        migrate_dsh_storage(home)
         row = [
-            " " * indent + "- id: wx-reply-agent\n",
+            " " * indent + "- id: notebridge\n",
             " " * (indent + 2) + "name: " + target.as_uri() + "\n",
             " " * (indent + 2) + "config:\n",
             " " * (indent + 4) + "port: " + str(self.state.load()["dsh_port"]) + "\n",
@@ -682,11 +720,7 @@ class Controller:
             # Preserve unrelated settings that may have changed while waiting for disposal.
             fresh = patch.read_text().splitlines(keepends=True)
             current = next(
-                (
-                    i
-                    for i, line in enumerate(fresh)
-                    if re.match(r"\s*- id: wx-reply-agent\s*$", line)
-                ),
+                (i for i, line in enumerate(fresh) if re.match(owned_pattern, line)),
                 None,
             )
             if current is None:
@@ -705,7 +739,10 @@ class Controller:
         while time.monotonic() < endtime:
             try:
                 status = self.dsh().request("/v1/status")
-                if status.get("build") == "0.2.0":
+                if (
+                    status.get("build") == VERSION
+                    and status.get("source_digest", "")[:16] == release
+                ):
                     return {"installed": True, "build": release, "ready": True}
             except (OSError, RuntimeError):
                 pass

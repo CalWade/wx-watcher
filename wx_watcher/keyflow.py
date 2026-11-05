@@ -32,7 +32,7 @@ class KeyFlow:
     def __init__(self, state: AppState):
         self.state = state
         # Privileged helper accepts only this canonical location, never arbitrary roots.
-        self.jobs = Path.home() / "Library/Application Support/WXWatcher/keytool/jobs"
+        self.jobs = Path.home() / "Library/Application Support/NoteBridge/setup/jobs"
 
     def preflight(self, root: str):
         root_path = Path(root).expanduser().resolve()

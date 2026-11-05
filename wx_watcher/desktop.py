@@ -17,6 +17,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from .appstate import AppState, app_home, atomic_json
+from .branding import BUNDLE_ID, LEGACY_BUNDLE_ID, login_file
 from .controller import Controller
 
 
@@ -33,7 +34,7 @@ def create_desktop(controller: Controller, token: str, port=0):
         def authorized(self):
             try:
                 cookie = SimpleCookie(self.headers.get("Cookie", ""))
-                value = cookie.get("wx_session")
+                value = cookie.get("notebridge_session") or cookie.get("wx_session")
                 return (
                     self.host_ok()
                     and value is not None
@@ -67,7 +68,7 @@ def create_desktop(controller: Controller, token: str, port=0):
             if cookie:
                 self.send_header(
                     "Set-Cookie",
-                    f"wx_session={token}; HttpOnly; SameSite=Strict; Path=/",
+                    f"notebridge_session={token}; HttpOnly; SameSite=Strict; Path=/",
                 )
             self.end_headers()
             try:
@@ -96,14 +97,11 @@ def create_desktop(controller: Controller, token: str, port=0):
                     return self.send(
                         200,
                         {
-                            "version": "0.2.0",
+                            "version": "0.3.0",
                             "services": controller.services.status(),
                             "records": controller.records(),
                             "jobs": list(controller.jobs.values())[-20:],
-                            "login_installed": (
-                                Path.home()
-                                / "Library/LaunchAgents/io.github.calwade.wx-watcher.plist"
-                            ).exists(),
+                            "login_installed": login_file().exists(),
                         },
                     )
                 if route.path == "/api/job":
@@ -121,7 +119,8 @@ def create_desktop(controller: Controller, token: str, port=0):
             if (
                 not self.host_ok()
                 or origin != f"http://127.0.0.1:{self.server.server_port}"
-                or self.headers.get("X-WX-UI") != "1"
+                or (self.headers.get("X-NoteBridge-UI") or self.headers.get("X-WX-UI"))
+                != "1"
             ):
                 return self.send(403, {"error": "origin_not_allowed"})
             try:
@@ -159,6 +158,7 @@ def create_desktop(controller: Controller, token: str, port=0):
                 "start",
                 "stop",
                 "capture-preflight",
+                "connection-check",
                 "capture-start",
                 "capture-status",
                 "capture-cancel",
@@ -184,14 +184,32 @@ def create_desktop(controller: Controller, token: str, port=0):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="WX Watcher 本地应用")
-    parser.add_argument("command", choices=["desktop", "setup", "service", "keytool"])
+    parser = argparse.ArgumentParser(description="NoteBridge 本地应用")
+    parser.add_argument(
+        "command", choices=["desktop", "setup", "service", "credentials", "keytool"]
+    )
     parser.add_argument("action", nargs="?", choices=["install", "uninstall", "status"])
     parser.add_argument("--data-dir", type=Path)
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--no-browser", action="store_true")
-    parser.add_argument("--keytool", action="store_true")
+    parser.add_argument(
+        "--credentials", "--keytool", dest="keytool", action="store_true"
+    )
     args = parser.parse_args()
+    migration = {}
+    if args.data_dir is None and not (
+        os.environ.get("NOTE_BRIDGE_HOME") or os.environ.get("WX_WATCHER_HOME")
+    ):
+        from .migration import migrate_default_state
+
+        try:
+            migration = migrate_default_state()
+        except (OSError, RuntimeError, ValueError) as error:
+            print(
+                json.dumps({"desktop_error": str(error)}, ensure_ascii=False),
+                flush=True,
+            )
+            return 1
     directory = (args.data_dir or app_home()).expanduser().resolve()
     if args.command == "service":
         return manage_login(args.action or "status", directory)
@@ -203,7 +221,7 @@ def main():
     except BlockingIOError:
         endpoint = json.loads((directory / "desktop-endpoint.json").read_text())
         url = endpoint["url"]
-        if args.keytool or args.command == "keytool":
+        if args.keytool or args.command in {"credentials", "keytool"}:
             url = url.replace("page=setup", "page=keytool")
         print(json.dumps({"desktop_url": url, "reused": True}), flush=True)
         if not args.no_browser:
@@ -211,7 +229,11 @@ def main():
         return 0
     token = secrets.token_urlsafe(32)
     server = create_desktop(controller, token, args.port)
-    fragment = "keytool" if args.keytool or args.command == "keytool" else "setup"
+    fragment = (
+        "keytool"
+        if args.keytool or args.command in {"credentials", "keytool"}
+        else "setup"
+    )
     url = f"http://127.0.0.1:{server.server_port}/#token={token}&page={fragment}"
     atomic_json(directory / "desktop-endpoint.json", {"url": url, "pid": os.getpid()})
     print(
@@ -225,7 +247,9 @@ def main():
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
-    parent = os.environ.get("WX_WATCHER_PARENT_PID", "")
+    parent = os.environ.get("NOTE_BRIDGE_PARENT_PID") or os.environ.get(
+        "WX_WATCHER_PARENT_PID", ""
+    )
     parent_done = threading.Event()
     if parent.isdecimal() and int(parent) == os.getppid():
 
@@ -235,8 +259,14 @@ def main():
                     server.shutdown()
                     break
 
-        threading.Thread(target=watch_parent, daemon=True, name="wx-app-owner").start()
-    if controller.state.load().get("autostart_monitor"):
+        threading.Thread(
+            target=watch_parent, daemon=True, name="notebridge-owner"
+        ).start()
+    if migration.get("legacy_login_installed"):
+        manage_login("install", directory, quiet=True)
+    if controller.state.load().get("autostart_monitor") or controller.state.load().get(
+        "migration_resume_requested"
+    ):
         controller.submit("start", {})
     try:
         server.serve_forever()
@@ -260,13 +290,20 @@ def manage_login(action, directory, quiet=False):
 
     from .services import command
 
-    file = Path.home() / "Library/LaunchAgents/io.github.calwade.wx-watcher.plist"
+    file = login_file()
+    legacy = file.with_name(LEGACY_BUNDLE_ID + ".plist")
+    if action in {"install", "uninstall"} and legacy.exists():
+        subprocess.run(
+            ["/bin/launchctl", "bootout", f"gui/{os.getuid()}", str(legacy)],
+            capture_output=True,
+        )
+        legacy.unlink()
     if action == "install":
         directory = AppState(directory).home
         file.parent.mkdir(parents=True, exist_ok=True)
         args = command("desktop", "--no-browser", "--data-dir", str(directory))
         if getattr(sys, "frozen", False):
-            gui = Path(sys.executable).parents[2] / "MacOS/WXWatcher"
+            gui = Path(sys.executable).parents[2] / "MacOS/NoteBridge"
             if gui.is_file():
                 args = [str(gui), "--background"]
         for name in ["desktop-launch.log", "desktop-error.log"]:
@@ -274,9 +311,10 @@ def manage_login(action, directory, quiet=False):
             log.touch(mode=0o600, exist_ok=True)
             log.chmod(0o600)
         value = {
-            "Label": "io.github.calwade.wx-watcher",
+            "Label": BUNDLE_ID,
+            "AssociatedBundleIdentifiers": [BUNDLE_ID],
             "ProgramArguments": args,
-            "EnvironmentVariables": {"WX_WATCHER_HOME": str(directory)},
+            "EnvironmentVariables": {"NOTE_BRIDGE_HOME": str(directory)},
             "RunAtLoad": True,
             "KeepAlive": False,
             "WorkingDirectory": str(Path.home()),

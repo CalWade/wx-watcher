@@ -6,7 +6,10 @@ import Darwin
 import GreenBubblesAcquire
 
 enum ToolError: Error, Equatable { case invalid(String) }
-let service = "io.github.calwade.wx-watcher.account-key.v1"
+enum CredentialNamespace {
+    static let service = "io.github.calwade.notebridge.account-key.v1"
+    static let legacy = "io.github.calwade.wx-watcher.account-key.v1"
+}
 
 func output(_ value: [String: Any]) {
     if let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]),
@@ -23,32 +26,42 @@ func keyData(_ hex: String) throws -> Data {
         return UInt8(hex[a..<hex.index(a, offsetBy: 2)], radix: 16)!
     })
 }
-func keyQuery(_ id: String, serviceSecret: Bool = false) throws -> [CFString: Any] {
+func keyQuery(_ id: String, serviceSecret: Bool = false, legacy: Bool = false) throws -> [CFString: Any] {
     guard UUID(uuidString: id) != nil else { throw ToolError.invalid("invalid_key_reference") }
-    return [kSecClass: kSecClassGenericPassword, kSecAttrService: service + (serviceSecret ? ".app-secret" : ""),
+    return [kSecClass: kSecClassGenericPassword, kSecAttrService: (legacy ? CredentialNamespace.legacy : CredentialNamespace.service) + (serviceSecret ? ".app-secret" : ""),
             kSecAttrAccount: id]
 }
 func loadValue(_ id: String, serviceSecret: Bool = false) throws -> Data {
-    var query = try keyQuery(id, serviceSecret: serviceSecret)
-    query[kSecReturnData] = true
-    query[kSecMatchLimit] = kSecMatchLimitOne
-    var result: CFTypeRef?
-    let status = SecItemCopyMatching(query as CFDictionary, &result)
-    guard status == errSecSuccess, let data = result as? Data, !data.isEmpty, data.count <= 4096
-    else { throw ToolError.invalid("keychain_read_\(status)") }
-    return data
+    for legacy in [false, true] {
+        var query = try keyQuery(id, serviceSecret: serviceSecret, legacy: legacy)
+        query[kSecReturnData] = true
+        query[kSecMatchLimit] = kSecMatchLimitOne
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if status == errSecItemNotFound { continue }
+        guard status == errSecSuccess, let data = result as? Data, !data.isEmpty, data.count <= 4096
+        else { throw ToolError.invalid("keychain_read_\(status)") }
+        if legacy {
+            // The OS may ask the user to approve the new executable. Once read,
+            // copy into the new namespace under the same opaque reference.
+            try saveKey(data, id, serviceSecret: serviceSecret, allowExisting: true)
+        }
+        return data
+    }
+    throw ToolError.invalid("keychain_read_\(errSecItemNotFound)")
 }
 func loadKey(_ id: String) throws -> Data {
     let data = try loadValue(id)
     guard data.count == 32 else { throw ToolError.invalid("invalid_key_length") }
     return data
 }
-func saveKey(_ data: Data, _ id: String, serviceSecret: Bool = false) throws {
+func saveKey(_ data: Data, _ id: String, serviceSecret: Bool = false, allowExisting: Bool = false) throws {
     var query = try keyQuery(id, serviceSecret: serviceSecret)
     query[kSecValueData] = data
-    query[kSecAttrLabel] = serviceSecret ? "WX Watcher Feishu app secret" : "WX Watcher account database key"
+    query[kSecAttrLabel] = serviceSecret ? "NoteBridge Feishu app secret" : "NoteBridge account database key"
     let status = SecItemAdd(query as CFDictionary, nil)
-    guard status == errSecSuccess else { throw ToolError.invalid("keychain_write_\(status)") }
+    guard status == errSecSuccess || (allowExisting && status == errSecDuplicateItem)
+    else { throw ToolError.invalid("keychain_write_\(status)") }
 }
 func verify(_ data: Data, root: String) throws -> [String: Any] {
     let directory = URL(fileURLWithPath: root)
@@ -97,37 +110,38 @@ func encryptedBackup(_ data: Data, password: String) throws -> [String: Any] {
     guard data.count == 32 else { throw ToolError.invalid("invalid_backup_key") }
     let salt = try random(16)
     let key = try derive(password, salt: salt)
-    let sealed = try AES.GCM.seal(data, using: key, authenticating: Data("wx-keytool-backup-v1".utf8))
-    return ["format": "wx-keytool-backup-v1", "kdf": "PBKDF2-SHA512", "rounds": 256000,
+    let sealed = try AES.GCM.seal(data, using: key, authenticating: Data("notebridge-backup-v1".utf8))
+    return ["format": "notebridge-backup-v1", "kdf": "PBKDF2-SHA512", "rounds": 256000,
             "salt": salt.base64EncodedString(), "sealed": sealed.combined!.base64EncodedString()]
 }
 func openBackup(_ backup: [String: Any], password: String) throws -> Data {
-    guard backup["format"] as? String == "wx-keytool-backup-v1", backup["kdf"] as? String == "PBKDF2-SHA512",
+    guard let format = backup["format"] as? String,
+          ["notebridge-backup-v1", "wx-keytool-backup-v1"].contains(format), backup["kdf"] as? String == "PBKDF2-SHA512",
           backup["rounds"] as? Int == 256000,
           let salt = Data(base64Encoded: try text(backup, "salt")), salt.count == 16,
           let sealed = Data(base64Encoded: try text(backup, "sealed")), sealed.count == 60
     else { throw ToolError.invalid("invalid_backup") }
     return try AES.GCM.open(AES.GCM.SealedBox(combined: sealed), using: derive(password, salt: salt),
-                            authenticating: Data("wx-keytool-backup-v1".utf8))
+                            authenticating: Data(format.utf8))
 }
 
 func request(_ input: [String: Any], internalRead: Bool) throws -> [String: Any] {
     let op = try text(input, "operation")
     switch op {
     case "doctor":
-        let candidates = [ProcessInfo.processInfo.environment["GREENBUBBLES_LLDB_PATH"],
-            "/Applications/Xcode.app/Contents/Developer/usr/bin/lldb", "/usr/bin/lldb"].compactMap { $0 }
         var chain: SecKeychain?
         let defaultStatus = SecKeychainCopyDefault(&chain)
         var keychainStatus: SecKeychainStatus = 0
         let probeStatus = chain.map { SecKeychainGetStatus($0, &keychainStatus) } ?? errSecNoSuchKeychain
-        return ["ok": true, "version": "0.2.0", "platform": "macOS",
+        return ["ok": true, "version": "0.3.0", "platform": "macOS",
                 "os": ProcessInfo.processInfo.operatingSystemVersionString,
-                "lldb": candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) ?? "",
-                "keychain_service": service, "keychain_default_status": defaultStatus,
+                "lldb": lldbExecutable() ?? "",
+                "keychain_service": CredentialNamespace.service, "keychain_default_status": defaultStatus,
                 "keychain_probe_status": probeStatus, "keychain_flags": keychainStatus]
     case "capture_preflight":
         return capturePreflight(dbRoot: try text(input, "db_root"), checkApplicationAccess: true)
+    case "connection_preflight":
+        return capturePreflight(dbRoot: input["db_root"] as? String)
     case "verify":
         let data: Data
         if input["key_ref"] != nil { data = try loadKey(text(input, "key_ref")) }
@@ -162,8 +176,10 @@ func request(_ input: [String: Any], internalRead: Bool) throws -> [String: Any]
         else { throw ToolError.invalid("invalid_secret") }
         return ["ok": true, "secret": secret]
     case "delete":
-        let status = SecItemDelete(try keyQuery(text(input, "key_ref")) as CFDictionary)
-        guard status == errSecSuccess || status == errSecItemNotFound else { throw ToolError.invalid("keychain_\(status)") }
+        for legacy in [false, true] {
+            let status = SecItemDelete(try keyQuery(text(input, "key_ref"), legacy: legacy) as CFDictionary)
+            guard status == errSecSuccess || status == errSecItemNotFound else { throw ToolError.invalid("keychain_\(status)") }
+        }
         return ["ok": true]
     case "export_backup":
         let data = try loadKey(text(input, "key_ref"))
@@ -185,7 +201,7 @@ if let index = CommandLine.arguments.firstIndex(of: "--capture-job"), CommandLin
     catch let ToolError.invalid(code) { output(["ok": false, "error": code]); exit(2) }
     catch { output(["ok": false, "error": "capture_transaction_failed"]); exit(2) }
 } else if CommandLine.arguments.contains("--help") {
-    print("wx-keytool 0.2.0 — local WeChat database credentials\nRead one JSON request from stdin: doctor, verify, store, export_backup, import_backup, delete.\nSecret input is never accepted in process arguments. Internal reader use requires --internal-read.")
+    print("notebridge-access 0.3.0 — local WeChat database credentials\nRead one JSON request from stdin: doctor, verify, store, export_backup, import_backup, delete.\nSecret input is never accepted in process arguments. Internal reader use requires --internal-read.")
 } else {
     do {
         let raw = FileHandle.standardInput.readDataToEndOfFile()

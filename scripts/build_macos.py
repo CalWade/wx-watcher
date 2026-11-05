@@ -16,7 +16,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 BUILD = ROOT / "build/macos"
 DIST = ROOT / "dist"
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 
 
 def run(args, **kwargs):
@@ -83,7 +83,7 @@ def main():
             "--clean",
             "--onedir",
             "--name",
-            "wx-watcher",
+            "notebridge",
             "--distpath",
             BUILD / "python-dist",
             "--workpath",
@@ -105,10 +105,13 @@ def main():
             ROOT / "scripts/app_entry.py",
         ]
     )
-    identity = os.environ.get("WX_CODESIGN_IDENTITY", "-")
+    identity = os.environ.get("NOTE_BRIDGE_CODESIGN_IDENTITY") or os.environ.get(
+        "WX_CODESIGN_IDENTITY", "-"
+    )
     artifacts = []
     minimum = "14.0"
-    for name, keytool in [("WX Watcher", False), ("WX Keytool", True)]:
+    for name, keytool in [("NoteBridge", False), ("NoteBridge Setup", True)]:
+        executable_name = "NoteBridgeSetup" if keytool else "NoteBridge"
         app = DIST / (name + ".app")
         if app.exists():
             shutil.rmtree(app)
@@ -117,26 +120,30 @@ def main():
         res = contents / "Resources"
         mac.mkdir(parents=True)
         res.mkdir()
-        shutil.copy2(ROOT / "native/.build/release/wx-watcher-app", mac / "WXWatcher")
-        shutil.copy2(ROOT / "native/.build/release/wx-keytool", res / "wx-keytool")
+        shutil.copy2(
+            ROOT / "native/.build/release/notebridge-app", mac / executable_name
+        )
+        shutil.copy2(
+            ROOT / "native/.build/release/notebridge-access", res / "notebridge-access"
+        )
         # Linker object-file debug records otherwise retain the builder's private path.
-        run(["/usr/bin/strip", "-S", mac / "WXWatcher"])
-        run(["/usr/bin/strip", "-S", res / "wx-keytool"])
-        shutil.copytree(BUILD / "python-dist/wx-watcher", res / "backend")
+        run(["/usr/bin/strip", "-S", mac / executable_name])
+        run(["/usr/bin/strip", "-S", res / "notebridge-access"])
+        shutil.copytree(BUILD / "python-dist/notebridge", res / "backend")
         minimum = minimum_system(contents)
         # The standalone tool uses the same GUI and backend in keytool mode.
         info = {
             "CFBundleName": name,
             "CFBundleDisplayName": name,
             "CFBundleIdentifier": "io.github.calwade."
-            + ("wx-keytool" if keytool else "wx-watcher"),
-            "CFBundleExecutable": "WXWatcher",
+            + ("notebridge.setup" if keytool else "notebridge"),
+            "CFBundleExecutable": executable_name,
             "CFBundlePackageType": "APPL",
             "CFBundleVersion": VERSION,
             "CFBundleShortVersionString": VERSION,
             "LSMinimumSystemVersion": minimum,
             "NSHighResolutionCapable": True,
-            "WXKeytoolMode": keytool,
+            "NoteBridgeSetupMode": keytool,
             "NSAppleEventsUsageDescription": "在你确认后使用系统授权窗口启动一次性的微信取钥与恢复任务。",
             "NSAppBundlesUsageDescription": "仅在首次取钥时，按你的确认临时准备微信调试签名，结束后恢复已验证的官方客户端。",
             "NSAppDataUsageDescription": "只读访问你选择的微信本地消息数据库，验证凭据并生成回复建议。",
@@ -192,15 +199,25 @@ def main():
             for p in notices.iterdir()
         ):
             raise SystemExit("Python redistribution license missing")
-        run(["/usr/bin/codesign", "--force", "--sign", identity, res / "wx-keytool"])
+        run(
+            [
+                "/usr/bin/codesign",
+                "--force",
+                "--identifier",
+                "io.github.calwade.notebridge.access",
+                "--sign",
+                identity,
+                res / "notebridge-access",
+            ]
+        )
         run(["/usr/bin/codesign", "--force", "--deep", "--sign", identity, app])
         run(["/usr/bin/codesign", "--verify", "--deep", "--strict", app])
         archive = DIST / (name.replace(" ", "-") + "-" + VERSION + "-arm64.zip")
         run(["/usr/bin/ditto", "-c", "-k", "--keepParent", app, archive])
         artifacts.append(archive)
-    stage = BUILD / "dmg"
+    stage = BUILD / ("dmg-" + VERSION)
     stage.mkdir(exist_ok=True)
-    for name in ["WX Watcher.app", "WX Keytool.app"]:
+    for name in ["NoteBridge.app", "NoteBridge Setup.app"]:
         target = stage / name
         if target.exists():
             shutil.rmtree(target)
@@ -208,7 +225,7 @@ def main():
     link = stage / "Applications"
     if not link.exists():
         link.symlink_to("/Applications")
-    dmg = DIST / ("WX-Watcher-" + VERSION + "-arm64.dmg")
+    dmg = DIST / ("NoteBridge-" + VERSION + "-arm64.dmg")
     if dmg.exists():
         dmg.unlink()
     run(
@@ -216,7 +233,7 @@ def main():
             "/usr/bin/hdiutil",
             "create",
             "-volname",
-            "WX Watcher",
+            "NoteBridge",
             "-srcfolder",
             stage,
             "-ov",

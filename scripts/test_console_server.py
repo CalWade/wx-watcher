@@ -1,5 +1,6 @@
 """Synthetic browser fixture server; never connects to personal data or external services."""
 
+import argparse
 import tempfile
 from pathlib import Path
 
@@ -30,7 +31,7 @@ class FakeServices:
 
 
 class FixtureController(Controller):
-    def __init__(self, directory):
+    def __init__(self, directory, fresh=False):
         super().__init__(directory)
         self.services = FakeServices()
         self.capture_phase = "idle"
@@ -46,6 +47,8 @@ class FixtureController(Controller):
             ],
             active_profile="fixture",
         )
+        if fresh:
+            self.state.update(profiles=[], active_profile="")
 
     def records(self):
         return [
@@ -99,6 +102,23 @@ class FixtureController(Controller):
             ]
         if operation == "capture-sessions":
             return []
+        if operation == "connection-check":
+            return {
+                "ready": True,
+                "db_root": "/example/db_storage",
+                "account_label": "合成当前账号",
+                "checks": [
+                    {"id": id, "title": title, "ok": True, "message": message}
+                    for id, title, message in [
+                        ("client", "官方微信", "已找到官方签名客户端"),
+                        ("version", "取钥兼容范围", "当前组合在已验证范围内"),
+                        ("debugger", "调试工具", "兼容的 LLDB 已就绪"),
+                        ("access", "微信资料读取权限", "未发现权限拒绝"),
+                        ("database", "本地消息资料", "已找到可读取的账号数据库"),
+                        ("account", "本次连接账号", "合成当前账号"),
+                    ]
+                ],
+            }
         if operation == "capture-start":
             self.capture_phase = "awaiting_login_page"
             return {"capture_id": "synthetic-capture", "phase": self.capture_phase}
@@ -135,9 +155,13 @@ class FixtureController(Controller):
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--fresh", action="store_true")
+    parser.add_argument("--port", type=int, default=19767)
+    args = parser.parse_args()
     with tempfile.TemporaryDirectory() as tmp:
-        c = FixtureController(Path(tmp) / "app")
-        server = create_desktop(c, "browser-fixture-token", 19767)
+        c = FixtureController(Path(tmp) / "app", fresh=args.fresh)
+        server = create_desktop(c, "browser-fixture-token", args.port)
         try:
             server.serve_forever()
         finally:

@@ -9,6 +9,126 @@ import subprocess
 import time
 from pathlib import Path
 
+from .branding import dsh_storage
+
+
+def check_first_connection(controller, requested_root=""):
+    """Read-only checks; never launch authorization, a debugger, or a capture job."""
+    import errno
+
+    from .credentials import native_request
+
+    denied = False
+    try:
+        accounts = controller.accounts()
+    except PermissionError:
+        accounts, denied = [], True
+    active = [a for a in accounts if a.get("active")]
+    chosen = (
+        active[0] if len(active) == 1 else accounts[0] if len(accounts) == 1 else None
+    )
+    root = (
+        str(Path(requested_root).expanduser().resolve())
+        if requested_root
+        else (chosen["db_root"] if chosen else "")
+    )
+    request = {"operation": "connection_preflight"}
+    if root:
+        request["db_root"] = root
+    native = native_request(request)
+    denied = denied or native.get("data_directory_errno") in {errno.EACCES, errno.EPERM}
+    denied = denied or native.get("database_access_errno") in {
+        errno.EACCES,
+        errno.EPERM,
+    }
+    checks = []
+
+    def check(id, title, ok, message, action=""):
+        checks.append(
+            dict(id=id, title=title, ok=bool(ok), message=message, action=action)
+        )
+
+    installed = native.get("wechat_installed", False)
+    official = native.get("official_signature", False) and native.get(
+        "hardened_runtime", False
+    )
+    check(
+        "client",
+        "官方微信",
+        installed and official,
+        "已找到官方签名客户端"
+        if installed and official
+        else "请先安装并正常打开官方 Mac 微信；本向导不提供微信安装包。",
+        "wechat",
+    )
+    supported = (
+        native.get("tested_build", False)
+        and native.get("tested_os", False)
+        and native.get("tested_architecture", False)
+    )
+    check(
+        "version",
+        "取钥兼容范围",
+        supported,
+        "当前系统与微信构建在已验证范围内"
+        if supported
+        else "自动取钥仅放行 Apple Silicon、macOS 27.0、微信 4.1.13（269630）。当前微信："
+        + (native.get("wechat_version") or "未识别")
+        + "；其他组合尚未验证，请勿反复授权或登录尝试。",
+    )
+    debugger = bool(native.get("lldb")) and native.get("debugger_compatible", False)
+    check(
+        "debugger",
+        "调试工具",
+        debugger,
+        "兼容的 LLDB 已就绪"
+        if debugger
+        else "请安装适用的 Apple Xcode 并完成首次打开；macOS 27 需要 LLDB 2000 或以上，旧版命令行工具可能不适用。安装后重新检查。",
+        "xcode",
+    )
+    check(
+        "access",
+        "微信资料读取权限",
+        not denied,
+        "未发现权限拒绝；有本地数据库后还会再次验证"
+        if not denied
+        else "请在完整磁盘访问权限允许本应用。列表中没有时，将窗口底部应用图标拖入列表，开启后点「重新连接」。",
+        "privacy",
+    )
+    initialized = bool(root) and native.get("database_readable", False)
+    check(
+        "database",
+        "本地消息资料",
+        initialized,
+        "已找到可读取的账号数据库"
+        if initialized
+        else "请先正常登录官方 Mac 微信，向文件传输助手发送「NoteBridge 连接测试」，再重新检查。首次登录和同步不由取钥工具代办。",
+        "wechat",
+    )
+    same_account = bool(root) and (
+        not active
+        or len(active) == 1
+        and Path(active[0]["db_root"]).resolve() == Path(root).resolve()
+    )
+    check(
+        "account",
+        "本次连接账号",
+        same_account,
+        (chosen["label"] if chosen and chosen["db_root"] == root else "已选择账号目录")
+        if same_account
+        else "请正常登录本次要连接的账号后重新检查；有多个历史账号时也可在高级选项手动选择。",
+    )
+    return {
+        "ready": all(c["ok"] for c in checks),
+        "checks": checks,
+        "db_root": root,
+        "account_label": chosen["label"]
+        if chosen and chosen["db_root"] == root
+        else "",
+        "accounts": accounts,
+        "native": native,
+    }
+
 
 def dsh_application():
     for name in ["DSH NEXT", "DeepSeek Harness"]:
@@ -27,9 +147,7 @@ def prepare_dsh(state):
 
         try:
             if (
-                LocalAPI(
-                    state.load()["dsh_port"], home / "storages/wx-reply-agent/token"
-                )
+                LocalAPI(state.load()["dsh_port"], dsh_storage(home) / "token")
                 .request("/v1/status")
                 .get("ready")
             ):

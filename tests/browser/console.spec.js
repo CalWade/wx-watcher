@@ -53,6 +53,8 @@ test("capture requires a separate login-page confirmation before login readiness
   await page.locator('nav [data-page="keytool"]').click();
   const confirm = page.locator("#capture-login-ready");
   await expect(confirm).toBeHidden();
+  await page.locator("#capture-check").click();
+  await expect(page.locator("#capture-start")).toBeEnabled();
   page.once("dialog", (dialog) => dialog.accept());
   await page.locator("#capture-start").click();
   await expect(confirm).toBeVisible();

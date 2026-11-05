@@ -18,7 +18,7 @@ from .reply import LocalAPI
 def command(*args):
     if getattr(sys, "frozen", False):
         return [sys.executable, *args]
-    return [sys.executable, "-m", "wx_watcher", *args]
+    return [sys.executable, "-m", "note_bridge", *args]
 
 
 class Services:
@@ -31,7 +31,9 @@ class Services:
         self.restarts = {"reader": [], "worker": []}
         self.last_error = None
         self.shutdown_event = threading.Event()
-        threading.Thread(target=self._watch, daemon=True, name="wx-supervisor").start()
+        threading.Thread(
+            target=self._watch, daemon=True, name="notebridge-supervisor"
+        ).start()
 
     def running(self):
         return any(p.poll() is None for p in self.children.values())

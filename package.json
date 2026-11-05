@@ -1,5 +1,5 @@
 {
-  "name": "wx-watcher-ui-tests",
+  "name": "notebridge-ui-tests",
   "private": true,
   "scripts": {
     "test": "playwright test"

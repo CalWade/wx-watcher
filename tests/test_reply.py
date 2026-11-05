@@ -43,7 +43,7 @@ class FakeDSH:
                 "id": data["id"],
                 "status": "completed",
                 "output": json.dumps(PROPOSAL, ensure_ascii=False),
-                "session_id": "wx-reply-" + data["id"],
+                "session_id": "notebridge-" + data["id"],
                 "usage": {"input": 20, "output": 30},
             }
             return {"id": data["id"], "status": "queued"}

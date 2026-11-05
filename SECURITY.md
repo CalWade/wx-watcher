@@ -1,6 +1,6 @@
 # Security and privacy
 
-Use WX Watcher only with accounts and conversations you are authorized to process.
+Use NoteBridge only with accounts and conversations you are authorized to process.
 
 - The daily reader does not attach to WeChat, modify its files or send messages.
 - Initial acquisition is separate, can re-sign/debug the client, and needs explicit

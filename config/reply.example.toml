@@ -1,6 +1,6 @@
 reader_config = "config/local.toml"
 state_dir = ".runtime/agent"
-dsh_token_file = "~/.dsh/storages/wx-reply-agent/token"
+dsh_token_file = "~/.dsh/storages/notebridge/token"
 dsh_port = 8766
 context_limit = 20
 poll_interval = 1

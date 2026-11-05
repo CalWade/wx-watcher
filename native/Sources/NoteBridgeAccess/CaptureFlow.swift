@@ -223,6 +223,49 @@ func currentlyOpenDatabaseRoots() -> Set<String> {
     return roots
 }
 
+func debuggerFailureCode(_ detail: String) -> String {
+    switch detail {
+    case "target_missing": return "wechat_process_exited_before_listener"
+    case "attach_denied": return "debugger_permission_denied"
+    case "attach_timeout": return "debugger_attach_timed_out"
+    case "listener_setup_timeout": return "listener_setup_timed_out"
+    default: return "debugger_attach_failed"
+    }
+}
+
+func captureFailureMessage(_ failure: String) -> String {
+    switch failure {
+    case "account_changed":
+        return "取钥期间微信打开了另一套账号目录，未保存候选密钥；官方微信已恢复。请选择当前账号的目录后再取钥。"
+    case "login_page_confirmation_timed_out":
+        return "等待登录页确认超时，官方微信已恢复，未保存密钥。"
+    case "wechat_temporary_sign_failed":
+        return "临时调试签名未完成，官方微信已恢复。请检查本应用的 App 管理权限，并查看任务诊断。"
+    case "wechat_process_exited_before_listener":
+        return "微信在监听连接前已退出，取钥尚未开始；官方客户端已恢复并重新打开。请查看启动诊断。"
+    case "debugger_permission_denied":
+        return "macOS 拒绝调试器连接微信，取钥尚未开始；官方客户端已恢复。请查看任务诊断中的授权状态。"
+    case "debugger_attach_timed_out":
+        return "等待调试器连接超过 90 秒，取钥尚未开始；官方客户端已恢复。"
+    case "listener_setup_timed_out":
+        return "监听准备超过 90 秒，尚未到达登录步骤；官方客户端已恢复。"
+    case "debugger_attach_failed":
+        return "取钥监听准备报错，尚未到达登录步骤；官方客户端已恢复。请查看任务诊断中的失败阶段。"
+    case "wechat_process_exited":
+        return "微信在取钥期间退出，未连接未经准备的新进程；官方客户端已恢复，请重新开始。"
+    case "candidate_verification_failed":
+        return "候选未通过所选账号数据库校验，未保存密钥；官方客户端已恢复，请检查所选账号。"
+    case "wechat_suspended_launch_failed":
+        return "暂停启动微信未完成，未开始登录；官方客户端已恢复，请查看任务诊断。"
+    case "capture_timed_out":
+        return "等待有效密钥超时，未保存密钥；官方微信已恢复。"
+    case "wechat_launch_failed":
+        return "微信启动未完成，官方客户端已恢复。请查看任务诊断。"
+    default:
+        return "本次取钥已结束，官方客户端已恢复"
+    }
+}
+
 func runCaptureJob(_ path: String, recoverOnly: Bool = false) throws {
     guard geteuid() == 0 else { throw ToolError.invalid("capture_requires_system_authorization") }
     var lockFDs: [Int32] = []
@@ -319,9 +362,9 @@ func runCaptureJob(_ path: String, recoverOnly: Bool = false) throws {
         } catch CaptureError.cancelled { failure = "cancelled" }
           catch CaptureError.timedOut { failure = "capture_timed_out" }
           catch CaptureError.attachFailed(let detail) {
-              failure = "debugger_attach_failed"
+              failure = debuggerFailureCode(detail)
               // Store only a fixed diagnostic stage, never raw debugger output.
-              let stage = ["attach_timeout", "listener_setup_timeout", "listener_setup_failed"].contains(detail) ? detail : "attach_error"
+              let stage = LLDBOutputParser.setupFailureStages.contains(detail) ? detail : "attach_error"
               journal.recordFailure(SystemStepError(code: failure, executable: "lldb", status: -1, detail: stage))
           }
           catch CaptureError.targetExited { failure = "wechat_process_exited" }
@@ -373,24 +416,7 @@ func runCaptureJob(_ path: String, recoverOnly: Bool = false) throws {
             return
         }
     }
-    let failedMessage = failure == "account_changed"
-        ? "取钥期间微信打开了另一套账号目录，未保存候选密钥；官方微信已恢复。请选择当前账号的目录后再取钥。"
-        : failure == "login_page_confirmation_timed_out"
-        ? "等待登录页确认超时，官方微信已恢复，未保存密钥。"
-        : failure == "wechat_temporary_sign_failed"
-        ? "临时调试签名未完成，官方微信已恢复。请检查本应用的 App 管理权限，并查看任务诊断。"
-        : failure == "debugger_attach_failed"
-        ? "调试器未完成附加或未在期限内恢复微信运行；官方微信已恢复，未保存密钥。"
-        : failure == "wechat_process_exited"
-        ? "微信在取钥期间退出，未连接未经准备的新进程；官方客户端已恢复，请重新开始。"
-        : failure == "candidate_verification_failed"
-        ? "候选未通过所选账号数据库校验，未保存密钥；官方客户端已恢复，请检查所选账号。"
-        : failure == "wechat_suspended_launch_failed"
-        ? "暂停启动微信未完成，未开始登录；官方客户端已恢复，请查看任务诊断。"
-        : failure == "capture_timed_out"
-        ? "等待有效密钥超时，未保存密钥；官方微信已恢复。"
-        : (failure == "wechat_launch_failed" ? "微信启动未完成，官方客户端已恢复。请查看任务诊断。" : "本次取钥已结束，官方客户端已恢复")
     journal.write(keyReady ? "captured" : (failure == "cancelled" ? "cancelled" : (recoverOnly ? "recovered" : "failed")),
-                  keyReady ? "官方客户端已恢复，正在准备安全保存密钥" : (recoverOnly ? "官方客户端已恢复" : failedMessage),
+                  keyReady ? "官方客户端已恢复，正在准备安全保存密钥" : (recoverOnly ? "官方客户端已恢复" : captureFailureMessage(failure)),
                   ["key_ready": keyReady, "official_restored": true, "error": failure, "observed_db_roots": observedRoots])
 }

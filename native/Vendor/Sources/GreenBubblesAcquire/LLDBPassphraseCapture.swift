@@ -142,6 +142,7 @@ public struct LLDBPassphraseCapture: Sendable {
     environment["TERM"] = "dumb"
     process.environment = environment
     process.executableURL = URL(fileURLWithPath: lldbPath)
+    process.currentDirectoryURL = URL(fileURLWithPath: "/private/tmp", isDirectory: true)
     process.arguments = ["--no-lldbinit"]
     process.standardInput = input
     process.standardOutput = output
@@ -224,8 +225,8 @@ public struct LLDBPassphraseCapture: Sendable {
         reportedRunning = true
         emit("capture ready; WeChat resumed and can be used for login")
       }
-      if lines.contains(where: { $0.hasPrefix("RuntimeError:") && $0.contains("GB_CAPTURE_SETUP_FAILED") }) {
-        throw CaptureError.attachFailed("listener_setup_failed")
+      if let stage = LLDBOutputParser.detectSetupFailure(in: current) {
+        throw CaptureError.attachFailed(stage)
       }
       if !reportedAttachFailure, let detail = LLDBOutputParser.detectAttachFailure(in: current) {
         reportedAttachFailure = true
@@ -246,6 +247,9 @@ public struct LLDBPassphraseCapture: Sendable {
         if let captured = LLDBOutputParser.parsePassphrase(from: final) {
           succeeded = true
           return try Self.makeSecret(consuming: captured)
+        }
+        if let stage = LLDBOutputParser.detectSetupFailure(in: final) {
+          throw CaptureError.attachFailed(stage)
         }
         if let detail = LLDBOutputParser.detectAttachFailure(in: final) {
           throw CaptureError.attachFailed(detail)

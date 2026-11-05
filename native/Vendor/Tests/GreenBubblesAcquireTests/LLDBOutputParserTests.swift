@@ -4,6 +4,13 @@ import Testing
 @testable import GreenBubblesAcquire
 
 struct LLDBOutputParserTests {
+  @Test func setupFailurePreservesStageWithoutLeakingErrorText() {
+    #expect(LLDBOutputParser.detectSetupFailure(in: "Traceback...\nRuntimeError: GB_CAPTURE_SETUP_FAILED:target_missing\n") == "target_missing")
+    #expect(LLDBOutputParser.detectSetupFailure(in: "RuntimeError: GB_CAPTURE_SETUP_FAILED:attach_denied") == "attach_denied")
+    #expect(LLDBOutputParser.detectSetupFailure(in: "RuntimeError: GB_CAPTURE_SETUP_FAILED:/private/secret") == "listener_setup_failed")
+    #expect(LLDBOutputParser.detectSetupFailure(in: "RuntimeError: GB_CAPTURE_SETUP_FAILED") == "listener_setup_failed")
+    #expect(LLDBOutputParser.detectSetupFailure(in: "(lldb) script exec('raise RuntimeError: GB_CAPTURE_SETUP_FAILED:target_missing')") == nil)
+  }
   // Hexdump lines copied from the real lldb output captured during the
   // 2026-08-27 mechanism test (.tmp/lldb-mech-test/lldb_out.txt). The bytes
   // are the synthetic pattern 00 11 22 ... fe 0f, not a real secret.

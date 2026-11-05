@@ -10,6 +10,26 @@ import Foundation
 /// lldb output is ignored. Returns the first 32 bytes once at least 32 have
 /// been collected, or `nil` while the output is still incomplete or malformed.
 public enum LLDBOutputParser {
+  /// Only fixed stage names cross into the job journal. Never persist raw LLDB
+  /// errors, which can contain file paths or captured data.
+  public static let setupFailureStages: Set<String> = [
+    "configuration", "attach", "target_missing", "attach_denied", "target_not_stopped",
+    "breakpoint", "breakpoint_commands", "resume", "listener_setup_failed",
+    "attach_timeout", "listener_setup_timeout",
+  ]
+
+  public static func detectSetupFailure(in output: String) -> String? {
+    let prefix = "RuntimeError: GB_CAPTURE_SETUP_FAILED"
+    for raw in output.split(whereSeparator: \.isNewline) {
+      let line = raw.trimmingCharacters(in: .whitespaces)
+      if line == prefix { return "listener_setup_failed" }
+      guard line.hasPrefix(prefix + ":") else { continue }
+      let stage = String(line.dropFirst(prefix.count + 1))
+      return setupFailureStages.contains(stage) ? stage : "listener_setup_failed"
+    }
+    return nil
+  }
+
   public static func parsePassphrase(from output: String) -> [UInt8]? {
     var bytes: [UInt8] = []
     for rawLine in output.split(whereSeparator: \.isNewline) {

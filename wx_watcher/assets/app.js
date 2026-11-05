@@ -141,7 +141,7 @@ function describeResult(op, value) {
       : "还有条件未满足，请处理下方提示后重新检查。";
   if (op === "capture-preflight")
     return value.ready
-      ? "环境检查通过。开始后请停在微信登录页，等待监听明确就绪再点击登录。"
+      ? "环境检查通过。开始后工具会自动准备监听，微信自动打开后登录即可。"
       : "暂时不能开始取钥。" +
           (value.permission_hint ||
             value.account_hint ||

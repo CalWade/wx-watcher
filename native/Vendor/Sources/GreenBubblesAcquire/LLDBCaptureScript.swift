@@ -43,10 +43,9 @@ public enum LLDBTargetArchitecture: String, Sendable {
   }
 }
 
-/// Generates the lldb command script whose ordering was validated live against
-/// the pinned WeChat build: attach, break on the system `CCKeyDerivationPBKDF`
-/// symbol when `passwordLen == 32`, read the 32-byte passphrase from the
-/// password register when the breakpoint hits, then detach and quit.
+/// Generates checked LLDB setup for an existing, optionally suspended target.
+/// The suspended first-call ordering is tested against a disposable program;
+/// real-client compatibility is recorded separately in docs/VALIDATION.md.
 public enum LLDBCaptureScript {
   public static func script(
     processID: pid_t,

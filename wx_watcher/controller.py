@@ -27,7 +27,7 @@ from .source import SnapshotReader, load_master, private_dir
 class Controller:
     def __init__(self, directory=None):
         self.state = AppState(directory)
-        self.services = Services(self.state)
+        self.services = Services(self.state, account_guard=self.require_current_account)
         self.pool = ThreadPoolExecutor(
             max_workers=2, thread_name_prefix="notebridge-setup"
         )
@@ -136,6 +136,86 @@ class Controller:
         except FileNotFoundError:
             return []
 
+    def account_status(self):
+        saved = self.state.load()
+        unavailable = False
+        try:
+            discovered = self.accounts()
+        except PermissionError:
+            discovered, unavailable = [], True
+        profiles = {str(Path(p["db_root"]).resolve()): p for p in saved["profiles"]}
+        rows = {}
+        for account in discovered:
+            root = str(Path(account["db_root"]).resolve())
+            rows[root] = {**account, "db_root": root, "available": True}
+        for root, profile in profiles.items():
+            rows.setdefault(
+                root,
+                {
+                    "label": profile["label"],
+                    "db_root": root,
+                    "active": False,
+                    "available": False,
+                },
+            )
+        for root, account in rows.items():
+            profile = profiles.get(root)
+            account.update(
+                profile_id=profile["id"] if profile else "",
+                credential_saved=bool(profile and profile.get("key_ref")),
+                selected=bool(profile and profile["id"] == saved["active_profile"]),
+            )
+        current_rows = [a for a in rows.values() if a["active"]]
+        current = current_rows[0] if len(current_rows) == 1 else None
+        selected = next((a for a in rows.values() if a["selected"]), None)
+        matches = bool(
+            current and selected and current["db_root"] == selected["db_root"]
+        )
+        if unavailable:
+            code, message = (
+                "unavailable",
+                "无法读取微信账号资料。已保存的账号仍列在下方；请允许完整磁盘访问权限，重新连接后刷新。",
+            )
+        elif not current:
+            code, message = (
+                "unconfirmed",
+                "尚未确认微信当前登录账号。请正常登录后刷新；若已登录，请检查资料读取权限。",
+            )
+        elif not current["credential_saved"]:
+            code, message = (
+                "needs_credentials",
+                "当前登录账号尚未保存密钥。请连接此账号；之前账号的凭据和记录会保留。",
+            )
+        elif not matches:
+            code, message = (
+                "switch_required",
+                "微信当前登录账号与本项目选择的账号不同。请验证并切换到当前账号后继续。",
+            )
+        else:
+            code, message = "matched", "当前登录账号与本项目使用的账号一致。"
+        return {
+            "code": code,
+            "message": message,
+            "current": current,
+            "selected": selected,
+            "matches_current": matches,
+            "accounts": list(rows.values()),
+        }
+
+    def require_current_account(self, profile=None):
+        from .discovery import active_roots
+
+        profile = profile or self.state.profile()
+        roots = active_roots()
+        if len(roots) != 1:
+            raise ValueError(
+                "尚未确认微信当前登录账号。请正常登录并在账号区域刷新；若已登录，请检查完整磁盘访问权限。"
+            )
+        if Path(roots[0]).resolve() != Path(profile["db_root"]).resolve():
+            raise ValueError(
+                "微信当前登录账号与本项目选择的账号不同。请在账号区域连接或切换当前账号，不能沿用旧账号配置。"
+            )
+
     def reader(self):
         p = self.state.profile()
         config = Config(
@@ -150,6 +230,7 @@ class Controller:
         return self.preview_reader
 
     def conversations(self, query=""):
+        self.require_current_account()
         reader = self.reader()
         rows = reader.rows(
             reader.config.db_root / "contact/contact.db",
@@ -210,6 +291,7 @@ class Controller:
 
             return connect_existing(self)
         if operation == "finish-setup":
+            self.require_current_account()
             self.perform("run-settings", data)
             verified = self.perform("verify-key", {})
             if not verified.get("all_verified"):
@@ -251,6 +333,8 @@ class Controller:
             return self.doctor()
         if operation == "accounts":
             return self.accounts()
+        if operation == "account-status":
+            return self.account_status()
         if operation == "conversations":
             return self.conversations(str(data.get("query", ""))[:100])
         if operation == "import-key":
@@ -354,11 +438,10 @@ class Controller:
                 p["id"] for p in self.state.load()["profiles"]
             }:
                 raise ValueError("账号配置不存在")
-            if (
+            switching = (
                 "active_profile" in values
                 and values["active_profile"] != self.state.load()["active_profile"]
-            ):
-                values.update(chat_id="", group_name="")
+            )
             for k in ["max_daily_calls", "retention_days"]:
                 if k in values and (
                     type(values[k]) is not int or not 0 <= values[k] <= 10000
@@ -381,7 +464,40 @@ class Controller:
                 )
             if "send_enabled" in values and type(values["send_enabled"]) is not bool:
                 raise ValueError("发送开关无效")
+            if "active_profile" in values:
+                profile = next(
+                    p
+                    for p in self.state.load()["profiles"]
+                    if p["id"] == values["active_profile"]
+                )
+                self.require_current_account(profile)
+                verified = native_request(
+                    {
+                        "operation": "verify",
+                        "db_root": profile["db_root"],
+                        "key_ref": profile["key_ref"],
+                    }
+                )
+                if not verified.get("all_verified"):
+                    raise ValueError(
+                        "此账号已保存的密钥未通过数据库验证，请先在微信凭据中修复连接。原配置未更改。"
+                    )
+                if switching:
+                    values.update(
+                        chat_id="",
+                        group_name="",
+                        send_enabled=False,
+                        autostart_monitor=False,
+                    )
             self.state.update(**values)
+            if switching:
+                if self.preview_reader is not None:
+                    self.preview_reader.close()
+                self.preview_reader = None
+                return {
+                    "saved": True,
+                    "message": "已验证并切换账号。请重新选择微信会话，确认飞书接收群后再开启投递与监控。",
+                }
             return {"saved": True}
         if operation == "feishu-secret":
             if self.services.running():
@@ -455,6 +571,7 @@ class Controller:
         if operation == "install-dsh":
             return self.install_dsh()
         if operation == "start":
+            self.require_current_account()
             if self.state.load().get("brand_bridge_pending"):
                 try:
                     with (
@@ -546,7 +663,7 @@ class Controller:
         if operation == "diagnostics":
             s = self.state.load()
             return {
-                "version": "0.3.0",
+                "version": "0.3.1",
                 "environment": self.doctor(),
                 "services": self.services.status(),
                 "profile_count": len(s["profiles"]),

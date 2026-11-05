@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from wx_watcher.appstate import AppState, atomic_json
-from wx_watcher.branding import app_home, dsh_storage
+from wx_watcher.branding import VERSION, app_home, dsh_storage
 from wx_watcher.controller import Controller
 from wx_watcher.migration import migrate_default_state, migrate_dsh_storage
 from wx_watcher.services import command
@@ -220,7 +220,7 @@ class BrandingMigrationTests(unittest.TestCase):
                     {
                         "ready": True,
                         "active": 0,
-                        "build": "0.3.0",
+                        "build": VERSION,
                         "source_digest": digest,
                     },
                 ]

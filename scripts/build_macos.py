@@ -142,6 +142,13 @@ def main():
         run(["/usr/bin/strip", "-S", mac / executable_name])
         run(["/usr/bin/strip", "-S", res / "notebridge-access"])
         shutil.copytree(BUILD / "python-dist/notebridge", res / "backend")
+        # Wheels may retain their upstream builder's absolute object-file paths.
+        # Remove only debug records from bundled copies, then restore signatures.
+        # Keep the distribution privacy check strict, including on CI runners.
+        for extension in sorted((res / "backend").rglob("*.so")):
+            if not extension.is_symlink():
+                run(["/usr/bin/strip", "-S", extension])
+                run(["/usr/bin/codesign", "--force", "--sign", identity, extension])
         minimum = minimum_system(contents)
         # The standalone tool uses the same GUI and backend in keytool mode.
         info = {

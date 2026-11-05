@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Strip upstream debug source paths from bundled Python extensions before signing. This fixes the macOS CI packaging check for zstandard wheels without weakening credential/path scanning or changing the installed 0.4.3 application.
+
 ## 0.4.3
 
 - Remove preliminary WeChat login and test-message requirements. New accounts can prepare the listener first, then log in and have their database discovered automatically.

@@ -74,6 +74,10 @@ class FixtureController(Controller):
             {"label": "合成当前账号", "db_root": "/example/db_storage", "active": True}
         ]
 
+    def require_local_account(self):
+        # Fixture setup must never inspect the real machine's WeChat process.
+        self.state.profile()
+
     def perform(self, operation, data):
         if operation == "connect-dsh":
             return {

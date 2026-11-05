@@ -129,85 +129,140 @@ test("missing prerequisites are actionable and never enable capture", async ({
   await expect(page.locator("#capture-start")).toBeDisabled();
 });
 
-test("first-run automatic listener leads to verified completion and session setup", async ({
-  page,
-}) => {
-  await page.locator("#first-connect").click();
-  await page.locator("#capture-check").click();
-  await expect(page.locator("#capture-start")).toBeEnabled();
-  await page.locator("#capture-start").click();
-  await page.locator("#confirm-yes").click();
-  await expect(page.locator("#capture-login-ready")).toBeHidden();
-  await expect(page.locator("#capture-progress")).toContainText("正在准备监听");
-  await expect(page.locator("#capture-timeline .current")).toContainText(
-    "自动准备监听",
-  );
-  await preview(page, "first-run-listener-preparation");
-  // Simulate the native listener becoming ready, with no user confirmation.
-  await page.route("**/api/action/capture-status", (route) =>
-    route.fulfill({
-      status: 202,
-      json: { job_id: "listener-ready" },
-    }),
-  );
-  await page.route("**/api/job?id=listener-ready", (route) =>
-    route.fulfill({
-      json: {
-        status: "completed",
-        result: { phase: "ready_for_login", message: "监听已就绪，可以登录" },
-      },
-    }),
-  );
-  await expect(page.locator("#capture-timeline .current")).toContainText(
-    "现在登录",
-  );
-  await expect(page.locator("#capture-progress")).toContainText("监听已就绪");
-  await page.route("**/api/job?id=listener-ready", (route) =>
-    route.fulfill({
-      json: {
-        status: "completed",
-        result: {
-          phase: "waiting_database",
-          message: "正在等待本地资料，无需发送消息",
+for (const loggedInAfterRestore of [true, false]) {
+  test(`first-run completion opens sessions when restored login is ${loggedInAfterRestore}`, async ({
+    page,
+  }) => {
+    await page.locator("#first-connect").click();
+    await page.locator("#capture-check").click();
+    await expect(page.locator("#capture-start")).toBeEnabled();
+    await page.locator("#capture-start").click();
+    await page.locator("#confirm-yes").click();
+    await expect(page.locator("#capture-login-ready")).toBeHidden();
+    await expect(page.locator("#capture-progress")).toContainText(
+      "正在准备监听",
+    );
+    await expect(page.locator("#capture-timeline .current")).toContainText(
+      "自动准备监听",
+    );
+    await preview(page, "first-run-listener-preparation");
+    // Simulate the native listener becoming ready, with no user confirmation.
+    await page.route("**/api/action/capture-status", (route) =>
+      route.fulfill({
+        status: 202,
+        json: { job_id: "listener-ready" },
+      }),
+    );
+    await page.route("**/api/job?id=listener-ready", (route) =>
+      route.fulfill({
+        json: {
+          status: "completed",
+          result: { phase: "ready_for_login", message: "监听已就绪，可以登录" },
         },
-      },
-    }),
-  );
-  await expect(page.locator("#capture-task h2")).toHaveText(
-    "正在等待资料并确认账号",
-  );
-  await expect(page.locator("#capture-timeline .current")).toContainText(
-    "验证",
-  );
-  await page.unroute("**/api/settings");
-  await page.unroute("**/api/action/account-status");
-  await page.unroute("**/api/job?id=fresh-account");
-  await page.route("**/api/action/capture-status", (route) =>
-    route.fulfill({
-      status: 202,
-      json: { job_id: "completed-capture" },
-    }),
-  );
-  await page.route("**/api/job?id=completed-capture", (route) =>
-    route.fulfill({
-      json: {
-        status: "completed",
-        result: {
-          phase: "completed",
-          verified: 2,
-          total: 2,
-          official_restored: true,
-          message: "合成凭据已验证并保存，官方客户端已恢复",
+      }),
+    );
+    await expect(page.locator("#capture-timeline .current")).toContainText(
+      "现在登录",
+    );
+    await expect(page.locator("#capture-progress")).toContainText("监听已就绪");
+    await page.route("**/api/job?id=listener-ready", (route) =>
+      route.fulfill({
+        json: {
+          status: "completed",
+          result: {
+            phase: "waiting_database",
+            message: "正在等待本地资料，无需发送消息",
+          },
         },
-      },
-    }),
-  );
-  await expect(page.locator("#continue-setup")).toBeVisible();
-  await expect(page.locator("#notice")).toContainText("2 / 2");
-  await preview(page, "first-run-complete");
-  await page.locator("#continue-setup").click();
-  await expect(page.locator("#chat-query")).toBeVisible();
-});
+      }),
+    );
+    await expect(page.locator("#capture-task h2")).toHaveText(
+      "正在等待资料并确认账号",
+    );
+    await expect(page.locator("#capture-timeline .current")).toContainText(
+      "验证",
+    );
+    await page.unroute("**/api/settings");
+    await page.unroute("**/api/action/account-status");
+    await page.unroute("**/api/job?id=fresh-account");
+    if (!loggedInAfterRestore) {
+      await page.route("**/api/settings", async (route) => {
+        const response = await route.fetch();
+        const settings = await response.json();
+        await route.fulfill({
+          json: { ...settings, feishu_chat_id: "oc_synthetic_destination" },
+        });
+      });
+      const selected = {
+        label: "刚取钥的合成账号",
+        db_root: "/example/db_storage",
+        profile_id: "fixture",
+        credential_saved: true,
+        selected: true,
+        active: false,
+      };
+      await page.route("**/api/action/account-status", (route) =>
+        route.fulfill({ status: 202, json: { job_id: "restored-logged-out" } }),
+      );
+      await page.route("**/api/job?id=restored-logged-out", (route) =>
+        route.fulfill({
+          json: {
+            status: "completed",
+            result: {
+              code: "local_ready",
+              current: null,
+              selected,
+              matches_current: false,
+              can_configure: true,
+              accounts: [selected],
+            },
+          },
+        }),
+      );
+    }
+    await page.route("**/api/action/capture-status", (route) =>
+      route.fulfill({
+        status: 202,
+        json: { job_id: "completed-capture" },
+      }),
+    );
+    await page.route("**/api/job?id=completed-capture", (route) =>
+      route.fulfill({
+        json: {
+          status: "completed",
+          result: {
+            phase: "completed",
+            verified: 2,
+            total: 2,
+            official_restored: true,
+            message: "合成凭据已验证并保存，官方客户端已恢复",
+          },
+        },
+      }),
+    );
+    await expect(page.locator("#continue-setup")).toBeVisible();
+    await expect(page.locator("#notice")).toContainText("2 / 2");
+    await preview(page, "first-run-complete");
+    await page.locator("#continue-setup").click();
+    await expect(page.locator("#chat-query")).toBeVisible();
+    await expect(page.locator("#find-chats")).toBeEnabled();
+    await page.locator("#find-chats").click();
+    await expect(page.locator("#chats")).toContainText("文件传输助手");
+    await page.locator("#chats button").first().click();
+    await expect(page.locator(".selected-value")).toContainText("文件传输助手");
+    await expect(page.locator("#step-next")).toBeEnabled();
+    if (!loggedInAfterRestore) {
+      await expect(page.locator("#setup-login-status")).toBeVisible();
+      await expect(page.locator(".account-strip")).toContainText(
+        "刚取钥的合成账号",
+      );
+      await page.locator('[data-step="5"]').click();
+      await expect(page.locator("#finish-setup")).toBeDisabled();
+      await page.locator('[data-step="2"]').click();
+      await expect(page.locator("#chat-query")).toBeVisible();
+    }
+  });
+}
 
 test("fresh account captures with no root and never reuses the old active account", async ({
   page,

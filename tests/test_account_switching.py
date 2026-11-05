@@ -54,11 +54,72 @@ class AccountSwitchingTests(unittest.TestCase):
         self.assertEqual(result["code"], "unconfirmed")
         self.assertIsNone(result["current"])
         self.assertFalse(result["matches_current"])
+        self.assertFalse(result["can_configure"])
+
+    def test_saved_local_account_can_be_configured_without_claiming_login(self):
+        self.c.accounts.return_value = [
+            {"label": "旧账号", "db_root": str(self.old), "active": False}
+        ]
+        result = self.c.account_status()
+        self.assertEqual(result["code"], "local_ready")
+        self.assertTrue(result["can_configure"])
+        self.assertIsNone(result["current"])
+        self.assertFalse(result["matches_current"])
+
+    def test_ambiguous_or_different_login_cannot_configure_selected_account(self):
+        self.assertFalse(self.c.account_status()["can_configure"])
+        self.c.accounts.return_value[0]["active"] = True
+        self.assertFalse(self.c.account_status()["can_configure"])
+        with patch(
+            "wx_watcher.discovery.active_roots", return_value=[self.old, self.current]
+        ):
+            with self.assertRaisesRegex(ValueError, "多个登录账号"):
+                self.c.conversations()
+
+    def test_local_conversations_and_selection_work_but_monitoring_stays_blocked(self):
+        reader = Mock()
+        reader.config.db_root = self.old
+        reader.rows.return_value = [
+            {"username": "filehelper", "nick_name": "文件传输助手"}
+        ]
+        with (
+            patch("wx_watcher.discovery.active_roots", return_value=[]),
+            patch.object(self.c, "reader", return_value=reader),
+            patch.object(self.c.services, "start") as start,
+            patch.object(self.c, "dsh") as model,
+            patch.object(self.c, "feishu") as delivery,
+        ):
+            rows = self.c.perform("conversations", {})
+            self.assertEqual(rows[0]["username"], "filehelper")
+            self.c.perform(
+                "settings", {"chat_id": "filehelper", "group_name": "文件传输助手"}
+            )
+            for op in ["start", "finish-setup"]:
+                with (
+                    self.subTest(operation=op),
+                    self.assertRaisesRegex(ValueError, "尚未确认"),
+                ):
+                    self.c.perform(op, {})
+        reader.rows.assert_called_once()
+        self.assertEqual(self.c.state.load()["chat_id"], "filehelper")
+        start.assert_not_called()
+        model.assert_not_called()
+        delivery.assert_not_called()
+
+    def test_account_change_blocks_stale_conversation_selection(self):
+        before = self.c.state.load()
+        with patch("wx_watcher.discovery.active_roots", return_value=[self.current]):
+            with self.assertRaisesRegex(ValueError, "账号不同"):
+                self.c.perform(
+                    "settings", {"chat_id": "filehelper", "group_name": "文件传输助手"}
+                )
+        self.assertEqual(self.c.state.load(), before)
 
     def test_permission_denial_keeps_saved_accounts_visible(self):
         self.c.accounts.side_effect = PermissionError("synthetic")
         result = self.c.account_status()
         self.assertEqual(result["code"], "unavailable")
+        self.assertFalse(result["can_configure"])
         self.assertEqual(result["selected"]["label"], "旧账号")
         self.assertTrue(result["accounts"][0]["credential_saved"])
 

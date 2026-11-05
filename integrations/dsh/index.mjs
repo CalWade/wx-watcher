@@ -294,7 +294,7 @@ export async function apply(ctx, config = {}) {
         return response(res, 200, {
           ready: !closing,
           mode: "reply-only",
-          build: "0.4.4",
+          build: "0.4.5",
           source_digest: SOURCE_DIGEST,
           route: ctx.agentDefaultModel.currentSelection(),
           cost_meter: "dsh-cost-meter",

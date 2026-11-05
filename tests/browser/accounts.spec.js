@@ -218,3 +218,54 @@ test("account names can be edited without switching account or touching credenti
   );
   await page.locator("#account-name-cancel").click();
 });
+
+test("temporary login detection loss preserves setup and known account switches still stop it", async ({
+  page,
+}) => {
+  const selected = { ...sampleReport().selected, active: true };
+  let report = {
+    code: "matched",
+    current: selected,
+    selected,
+    matches_current: true,
+    can_configure: true,
+    accounts: [selected],
+  };
+  let polls = 0;
+  await mockReport(page, () => {
+    polls++;
+    return report;
+  });
+  await page.goto("/#token=browser-fixture-token&page=setup");
+  await expect(page.locator("#chat-query")).toBeVisible();
+  await page.locator("#chat-query").fill("尚未提交的会话搜索");
+  report = {
+    ...report,
+    code: "local_ready",
+    current: null,
+    matches_current: false,
+  };
+  const before = polls;
+  await expect.poll(() => polls, { timeout: 10000 }).toBeGreaterThan(before);
+  await expect(page.locator("#chat-query")).toHaveValue("尚未提交的会话搜索");
+  await expect(page.locator("#find-chats")).toBeEnabled();
+  await expect(page.locator("#setup-login-status")).toBeVisible();
+  await page.locator('[data-step="3"]').click();
+  await page.locator('[data-step="2"]').click();
+  await expect(page.locator("#chat-query")).toHaveValue("尚未提交的会话搜索");
+  await page.reload();
+  await expect(page.locator("#find-chats")).toBeEnabled();
+  await expect(page.locator(".account-strip")).toContainText(selected.label);
+  if (process.env.NOTE_BRIDGE_SCREENSHOTS)
+    await page.screenshot({
+      path: "docs/images/setup-after-capture.png",
+      fullPage: true,
+    });
+  report = { ...sampleReport(), can_configure: false };
+  await page.locator("#refresh-setup-account").click();
+  await expect(page.locator('[data-step="2"]')).toBeDisabled();
+  await expect(page.locator("#find-chats")).toHaveCount(0);
+  await expect(page.locator("#wechat-current-account")).toHaveText(
+    "微信新登录账号",
+  );
+});

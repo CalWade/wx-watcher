@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.3
+
+- Remove preliminary WeChat login and test-message requirements. New accounts can prepare the listener first, then log in and have their database discovered automatically.
+- Separate missing data from denied access. When no data directory exists, confirm Full Disk Access independently without reading protected system contents.
+- Show historical-account selection and a login-other-account option directly in the capture wizard.
+- Bind the candidate to the exact controlled process's account, wait up to two minutes for complete database headers within the overall deadline, and verify before persisting. Never select historical data by modification time; reject ambiguous/mismatched roots and symlinks.
+- Preserve cancellation and official-client restoration. Save the discovered account with its verified credential; keep legacy completed jobs compatible.
+- Update the first-run guide and synthetic previews. Automated tests include delayed first-page creation, wrong keys, account switching and cancellation. First-login acceptance on a real fresh account remains for the user to perform; it was not run automatically.
+
 ## 0.4.2
 
 - Keep suspended WeChat alive across launcher exit by creating a separate process session. The prior helper inherited a process group that macOS terminated when it became orphaned.

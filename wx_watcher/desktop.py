@@ -97,7 +97,7 @@ def create_desktop(controller: Controller, token: str, port=0):
                     return self.send(
                         200,
                         {
-                            "version": "0.4.2",
+                            "version": "0.4.3",
                             "services": controller.services.status(),
                             "records": controller.records(),
                             "jobs": list(controller.jobs.values())[-20:],

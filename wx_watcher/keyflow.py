@@ -34,59 +34,58 @@ class KeyFlow:
         # Privileged helper accepts only this canonical location, never arbitrary roots.
         self.jobs = Path.home() / "Library/Application Support/NoteBridge/setup/jobs"
 
-    def preflight(self, root: str):
-        root_path = Path(root).expanduser().resolve()
-        # Probe in the actual bundled native tool. A source Python process can
-        # inherit different privacy permissions and must not stand in for it.
-        result = native_request(
-            {"operation": "capture_preflight", "db_root": str(root_path)}
-        )
+    def preflight(self, root: str = "", discover_account=False):
+        if discover_account and root.strip():
+            raise ValueError("请只选择一个取钥目标：已有账号或登录时识别")
+        root_path = Path(root).expanduser().resolve() if root.strip() else None
+        request = {"operation": "capture_preflight"}
+        if root_path:
+            request["db_root"] = str(root_path)
+        result = native_request(request)
         from .discovery import active_roots
 
         active = active_roots()
         result["wechat_logged_in"] = bool(active)
         result["active_account_matches"] = len(active) == 1 and active[0] == root_path
+        access = result.get("data_access_ready", result.get("database_readable", False))
         result["ready"] = (
             result["ready"]
-            and result.get("database_readable", False)
+            and access
             and result.get("application_manageable", False)
-            and (not active or result["active_account_matches"])
+            and (root_path is not None or discover_account)
         )
-        if active and not result["active_account_matches"]:
-            result["account_hint"] = (
-                "请正常登录要取钥的账号，并选择当前微信实际打开的 db_storage，避免用旧账号资料验证"
-            )
-        elif not active:
-            result["account_hint"] = (
-                "工具会先准备好监听，再自动打开微信。微信打开后，登录所选账号即可。"
-            )
-        elif not result.get("database_readable", False) and not result.get(
-            "permission_hint"
-        ):
+        result["account_mode"] = "login" if discover_account else "existing"
+        result["account_hint"] = (
+            "监听准备好后登录你要连接的账号，程序自动发现资料并验证。"
+            if discover_account
+            else "监听准备好后登录所选账号；无需提前登录或发送消息。"
+        )
+        if not access and not result.get("permission_hint"):
             result["permission_hint"] = (
-                "取钥工具未确认数据访问权限，请更新当前安装版后重新检查。"
+                "取钥工具未确认读取权限，请在权限帮助中完成授权并重新连接。"
             )
+        if not root_path and not discover_account:
+            result["blocking_reason"] = "请先选择一个账号，或选择登录其他账号。"
         result["steps"] = [
             "环境检查",
-            "账号确认",
+            "账号选择",
             "数据访问与 App 管理权限",
             "官方客户端备份",
             "自动准备监听",
-            "监听就绪后打开微信",
             "登录所选账号",
-            "密钥验证",
+            "自动发现资料与验证",
             "恢复客户端",
             "Keychain 保存",
         ]
         return result
 
-    def start(self, root: str):
+    def start(self, root: str = "", discover_account=False):
         with self.lock:
-            report = self.preflight(root)
+            report = self.preflight(root, discover_account)
             if not report["ready"]:
                 raise ValueError(
                     report.get("permission_hint")
-                    or report.get("account_hint")
+                    or report.get("blocking_reason")
                     or "取钥前置条件未通过，请先查看环境检查；当前仅允许已验证的微信构建"
                 )
             private_dir(self.jobs)
@@ -103,29 +102,13 @@ class KeyFlow:
             id = str(uuid.uuid4())
             directory = self.jobs / id
             private_dir(directory)
-            samples = directory / "samples"
-            private_dir(samples)
-            root_path = Path(root).expanduser().resolve()
-            count = 0
-            for source in sorted(root_path.rglob("*.db")):
-                if source.is_symlink() or not source.is_file():
-                    continue
-                with source.open("rb") as f:
-                    page = f.read(4096)
-                if len(page) != 4096 or page.startswith(b"SQLite format 3"):
-                    continue
-                target = samples / (str(count) + ".db")
-                target.write_bytes(page)
-                target.chmod(0o600)
-                count += 1
-            if not count:
-                raise ValueError("未发现可用于校验的加密数据库首部")
+            root_path = Path(root).expanduser().resolve() if root.strip() else None
             atomic_json(
                 directory / "request.json",
                 {
-                    "db_root": str(root_path),
+                    "db_root": str(root_path) if root_path else "",
+                    "account_mode": "login" if discover_account else "existing",
                     "uid": os.getuid(),
-                    "count": count,
                     "owner_pid": os.getpid(),
                 },
             )
@@ -272,17 +255,38 @@ class KeyFlow:
             progress = json.loads((directory / "progress.json").read_text())
             if progress.get("phase") == "captured":
                 request = json.loads((directory / "request.json").read_text())
+                binding = directory / "verified-account.json"
+                if binding.exists():
+                    bound_root = Path(json.loads(binding.read_text())["db_root"])
+                    base = (
+                        Path.home()
+                        / "Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files"
+                    )
+                    if (
+                        bound_root != bound_root.resolve()
+                        or bound_root.name != "db_storage"
+                        or bound_root.parent.parent != base.resolve()
+                    ):
+                        raise ValueError("取钥结果的账号目录无效，未保存凭据")
+                    if request.get("db_root") and str(bound_root) != request["db_root"]:
+                        raise ValueError("取钥结果与所选账号不一致，未保存凭据")
+                elif request.get("account_mode") == "login" or not request.get(
+                    "db_root"
+                ):
+                    raise ValueError("尚未确认本次登录的账号目录，未保存凭据")
+                else:
+                    bound_root = Path(request["db_root"])
                 key_file = directory / "pending-key"
                 raw = load_master(key_file)
                 saved = native_request(
                     {
                         "operation": "store",
                         "key_hex": raw.hex(),
-                        "db_root": request["db_root"],
+                        "db_root": str(bound_root),
                     }
                 )
                 self.state.add_profile(
-                    Path(request["db_root"]),
+                    bound_root,
                     saved["key_ref"],
                     verification={k: v for k, v in saved.items() if k != "key_ref"},
                 )
@@ -292,6 +296,7 @@ class KeyFlow:
                     message="密钥已验证并存入 Keychain，官方微信已恢复",
                     verified=saved["verified"],
                     total=saved["total"],
+                    account_label=bound_root.parent.name,
                 )
                 atomic_json(directory / "progress.json", progress)
             return progress

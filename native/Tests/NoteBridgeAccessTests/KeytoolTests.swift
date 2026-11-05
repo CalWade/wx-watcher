@@ -16,7 +16,7 @@ import Security
         #expect(captureFailureMessage(debuggerFailureCode("attach_timeout")).contains("90 秒"))
     }
     @Test func missingLocalDataIsDistinguishedFromPrivacyDenial() {
-        #expect(databaseAccessHint(ENOENT).contains("正常登录"))
+        #expect(databaseAccessHint(ENOENT).contains("无需预先登录"))
         #expect(!databaseAccessHint(ENOENT).contains("完整磁盘"))
         #expect(databaseAccessHint(EPERM).contains("完整磁盘"))
         #expect(databaseAccessHint(EACCES).contains("重新连接"))

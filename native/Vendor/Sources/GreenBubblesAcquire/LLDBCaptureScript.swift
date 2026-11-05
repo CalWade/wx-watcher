@@ -52,21 +52,43 @@ public enum LLDBCaptureScript {
     processID: pid_t,
     architecture: LLDBTargetArchitecture = .current
   ) -> String {
+    // Execute setup as one checked Python transaction. An LLDB command error
+    // must not fall through to `continue` or publish a false ready marker.
+    let setup = """
+    import lldb
+    def checked(command):
+        result = lldb.SBCommandReturnObject()
+        lldb.debugger.GetCommandInterpreter().HandleCommand(command, result)
+        if not result.Succeeded():
+            raise RuntimeError("GB_CAPTURE_SETUP_FAILED")
+    checked("settings set target.preload-symbols false")
+    checked("settings set target.process.stop-on-exec false")
+    checked("settings set interpreter.prompt-on-quit false")
+    checked("process attach -p \(processID)")
+    target = lldb.debugger.GetSelectedTarget()
+    if target.GetProcess().GetState() != lldb.eStateStopped:
+        raise RuntimeError("GB_CAPTURE_SETUP_FAILED")
+    print("GB_CAPTURE_ATTACHED", flush=True)
+    bp = target.BreakpointCreateByName("CCKeyDerivationPBKDF")
+    if not bp.IsValid() or not bp.IsEnabled():
+        raise RuntimeError("GB_CAPTURE_SETUP_FAILED")
+    bp.SetCondition("\(architecture.databaseKeyCondition)")
+    commands = lldb.SBStringList()
+    commands.AppendString("memory read --size 1 --count 32 --format x $\(architecture.passwordRegister)")
+    commands.AppendString("detach")
+    commands.AppendString("quit")
+    bp.SetCommandLineCommands(commands)
+    installed = lldb.SBStringList()
+    bp.GetCommandLineCommands(installed)
+    if installed.GetSize() != 3:
+        raise RuntimeError("GB_CAPTURE_SETUP_FAILED")
+    print("GB_CAPTURE_ARMED", flush=True)
+    lldb.debugger.SetAsync(True)
+    checked("process continue")
+    print("GB_CAPTURE_RUNNING", flush=True)
     """
-    settings set target.preload-symbols false
-    settings set target.process.stop-on-exec false
-    settings set interpreter.prompt-on-quit false
-    process attach -p \(processID)
-    script print("GB_CAPTURE_ATTACHED")
-    breakpoint set -n CCKeyDerivationPBKDF -c '\(architecture.databaseKeyCondition)'
-    breakpoint command add 1
-    memory read --size 1 --count 32 --format x $\(architecture.passwordRegister)
-    detach
-    quit
-    DONE
-    script print("GB_CAPTURE_ARMED")
-    process continue
-
-    """
+    // JSON string literals are also valid Python strings for this ASCII script.
+    let encoded = String(data: try! JSONSerialization.data(withJSONObject: setup, options: [.fragmentsAllowed]), encoding: .utf8)!
+    return "script exec(\(encoded))\n"
   }
 }

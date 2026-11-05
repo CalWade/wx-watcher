@@ -127,7 +127,7 @@ test("missing prerequisites are actionable and never enable capture", async ({
   await expect(page.locator("#capture-start")).toBeDisabled();
 });
 
-test("first-run login gate leads to verified completion and session setup", async ({
+test("first-run automatic listener leads to verified completion and session setup", async ({
   page,
 }) => {
   await page.locator("#first-connect").click();
@@ -135,12 +135,27 @@ test("first-run login gate leads to verified completion and session setup", asyn
   await expect(page.locator("#capture-start")).toBeEnabled();
   await page.locator("#capture-start").click();
   await page.locator("#confirm-yes").click();
-  await expect(page.locator("#capture-login-ready")).toBeVisible();
+  await expect(page.locator("#capture-login-ready")).toBeHidden();
+  await expect(page.locator("#capture-progress")).toContainText("正在准备监听");
   await expect(page.locator("#capture-timeline .current")).toContainText(
-    "停在登录页",
+    "自动准备监听",
   );
-  await preview(page, "first-run-login-gate");
-  await page.locator("#capture-login-ready").click();
+  await preview(page, "first-run-listener-preparation");
+  // Simulate the native listener becoming ready, with no user confirmation.
+  await page.route("**/api/action/capture-status", (route) =>
+    route.fulfill({
+      status: 202,
+      json: { job_id: "listener-ready" },
+    }),
+  );
+  await page.route("**/api/job?id=listener-ready", (route) =>
+    route.fulfill({
+      json: {
+        status: "completed",
+        result: { phase: "ready_for_login", message: "监听已就绪，可以登录" },
+      },
+    }),
+  );
   await expect(page.locator("#capture-timeline .current")).toContainText(
     "现在登录",
   );

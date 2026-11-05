@@ -130,10 +130,12 @@ test("cancelled capture can be retried and returning to the wizard keeps live pr
   await expect(page.locator("#capture-login-ready")).toBeHidden();
   await page.locator("#capture-start").click();
   await page.locator("#confirm-yes").click();
-  await expect(page.locator("#capture-login-ready")).toBeVisible();
+  await expect(page.locator("#capture-login-ready")).toBeHidden();
+  await expect(page.locator("#capture-progress")).toContainText("正在准备监听");
   await page.locator('[data-page="overview"]').click();
   await openMore(page, "keytool");
-  await expect(page.locator("#capture-login-ready")).toBeVisible();
+  await expect(page.locator("#capture-login-ready")).toBeHidden();
+  await expect(page.locator("#capture-progress")).toContainText("正在准备监听");
   await expect(page.locator("#capture-check")).toBeHidden();
   await expect(page.locator("#import-key")).toBeDisabled();
   await page.locator("#capture-cancel").click();

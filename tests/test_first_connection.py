@@ -25,17 +25,18 @@ class FirstConnectionTests(unittest.TestCase):
             "lldb": "/example/lldb",
             "debugger_compatible": True,
             "database_readable": True,
+            "data_access_ready": True,
             "data_directory_errno": 0,
         }
 
     def tearDown(self):
         self.temp.cleanup()
 
-    def check(self, root=""):
+    def check(self, root="", discover=False):
         with patch(
             "wx_watcher.credentials.native_request", return_value=self.native
         ) as native:
-            result = check_first_connection(self.controller, root)
+            result = check_first_connection(self.controller, root, discover)
         # This operation must not request application-write access or a privileged job.
         self.assertEqual(native.call_args.args[0]["operation"], "connection_preflight")
         return result
@@ -46,14 +47,16 @@ class FirstConnectionTests(unittest.TestCase):
         self.assertEqual(result["db_root"], self.root)
         self.controller.services.start.assert_not_called()
 
-    def test_empty_machine_explains_initial_login_instead_of_missing_permission(self):
+    def test_empty_machine_can_prepare_listener_before_first_login(self):
         self.controller.accounts.return_value = []
         self.native.update(database_readable=False, data_directory_errno=errno.ENOENT)
         result = self.check()
-        self.assertFalse(result["ready"])
+        self.assertTrue(result["ready"])
+        self.assertEqual(result["account_mode"], "login")
+        self.assertEqual(result["db_root"], "")
         checks = {c["id"]: c for c in result["checks"]}
         self.assertTrue(checks["access"]["ok"])
-        self.assertIn("先正常登录", checks["database"]["message"])
+        self.assertIn("登录后自动", checks["database"]["message"])
 
     def test_native_privacy_denial_blocks_even_if_parent_can_list_accounts(self):
         self.native.update(database_readable=False, database_access_errno=errno.EPERM)
@@ -84,9 +87,26 @@ class FirstConnectionTests(unittest.TestCase):
         self.assertFalse(result["ready"])
         self.assertEqual(result["db_root"], "")
 
-    def test_wrong_manual_account_is_rejected_while_another_account_is_active(self):
+    def test_explicit_account_can_be_selected_before_switching_login(self):
         result = self.check(self.root + "-other")
-        self.assertFalse(result["ready"])
-        self.assertFalse(
-            next(c for c in result["checks"] if c["id"] == "account")["ok"]
+        self.assertTrue(result["ready"])
+        self.assertEqual(result["db_root"], str(Path(self.root + "-other").resolve()))
+
+    def test_missing_directory_does_not_imply_permission(self):
+        self.controller.accounts.return_value = []
+        self.native.update(
+            database_readable=False,
+            data_access_ready=False,
+            data_directory_errno=errno.ENOENT,
         )
+        result = self.check()
+        self.assertFalse(result["ready"])
+        checks = {c["id"]: c for c in result["checks"]}
+        self.assertIn("权限尚未确认", checks["database"]["message"])
+        self.assertFalse(checks["access"]["ok"])
+
+    def test_login_other_account_does_not_reuse_active_historical_root(self):
+        result = self.check(discover=True)
+        self.assertTrue(result["ready"])
+        self.assertEqual(result["account_mode"], "login")
+        self.assertEqual(result["db_root"], "")

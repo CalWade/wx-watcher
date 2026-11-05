@@ -673,17 +673,23 @@ class Controller:
         if operation == "connection-check":
             from .onboarding import check_first_connection
 
-            return check_first_connection(self, str(data.get("db_root", "")))
+            return check_first_connection(
+                self, str(data.get("db_root", "")), data.get("discover_account") is True
+            )
         if operation == "capture-preflight":
             from .keyflow import KeyFlow
 
-            return KeyFlow(self.state).preflight(str(data.get("db_root", "")))
+            return KeyFlow(self.state).preflight(
+                str(data.get("db_root", "")), data.get("discover_account") is True
+            )
         if operation == "capture-start":
             if self.services.running():
                 raise ValueError("请先暂停监听再开始首次取钥")
             from .keyflow import KeyFlow
 
-            return KeyFlow(self.state).start(str(data["db_root"]))
+            return KeyFlow(self.state).start(
+                str(data.get("db_root", "")), data.get("discover_account") is True
+            )
         if operation == "capture-cancel":
             from .keyflow import KeyFlow
 
@@ -707,7 +713,7 @@ class Controller:
         if operation == "diagnostics":
             s = self.state.load()
             return {
-                "version": "0.4.2",
+                "version": "0.4.3",
                 "environment": self.doctor(),
                 "services": self.services.status(),
                 "profile_count": len(s["profiles"]),

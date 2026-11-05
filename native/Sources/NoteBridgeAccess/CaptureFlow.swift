@@ -44,7 +44,7 @@ func probeFileAccess(_ path: String, write: Bool = false) -> (allowed: Bool, err
     return (true, 0)
 }
 
-func capturePreflight(dbRoot: String? = nil, checkApplicationAccess: Bool = false) -> [String: Any] {
+func capturePreflight(dbRoot: String? = nil, checkApplicationAccess: Bool = false, userHome: URL? = nil) -> [String: Any] {
     let app = URL(fileURLWithPath: "/Applications/WeChat.app")
     let bundle = Bundle(url: app)
     let version = bundle?.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
@@ -64,9 +64,13 @@ func capturePreflight(dbRoot: String? = nil, checkApplicationAccess: Bool = fals
     #else
     let testedArchitecture = false
     #endif
-    let dataAccess = probeFileAccess(FileManager.default.homeDirectoryForCurrentUser
+    let dataAccess = probeFileAccess((userHome ?? FileManager.default.homeDirectoryForCurrentUser)
         .appendingPathComponent("Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files").path)
-    var result: [String: Any] = ["ok": true, "wechat_installed": bundle != nil,
+    // A missing account directory is normal on first login. Confirm FDA independently
+    // without reading protected system data; absence must never count as permission.
+    let accessReady = dataAccess.allowed || ((dataAccess.error == ENOENT || dataAccess.error == ENOTDIR)
+        && probeFileAccess("/Library/Application Support/com.apple.TCC/TCC.db").allowed)
+    var result: [String: Any] = ["ok": true, "data_access_ready": accessReady, "wechat_installed": bundle != nil,
         "data_directory_readable": dataAccess.allowed, "data_directory_errno": dataAccess.error,
         "wechat_version": version, "wechat_build": build, "tested_build": supported,
         "official_signature": details.contains("TeamIdentifier=5A4RE8SF68"),
@@ -74,15 +78,14 @@ func capturePreflight(dbRoot: String? = nil, checkApplicationAccess: Bool = fals
         "lldb": debugger, "lldb_version": debuggerVersion, "debugger_compatible": compatible,
         "tested_architecture": testedArchitecture, "requires_admin": true,
         "tested_os": testedOS,
-        "ready": supported && testedOS && testedArchitecture && compatible && details.contains("TeamIdentifier=5A4RE8SF68") && !debugger.isEmpty]
+        "ready": accessReady && supported && testedOS && testedArchitecture && compatible && details.contains("TeamIdentifier=5A4RE8SF68") && !debugger.isEmpty]
     if let dbRoot {
         let access = probeFileAccess(URL(fileURLWithPath: dbRoot).appendingPathComponent("contact/contact.db").path)
         result["database_readable"] = access.allowed
         result["database_access_errno"] = access.error
         if !access.allowed {
-            result["ready"] = false
             result["permission_hint"] = databaseAccessHint(access.error)
-            return result
+            if access.error != ENOENT && access.error != ENOTDIR { result["ready"] = false }
         }
     }
     if checkApplicationAccess {
@@ -100,7 +103,7 @@ func capturePreflight(dbRoot: String? = nil, checkApplicationAccess: Bool = fals
 
 func databaseAccessHint(_ error: Int32) -> String {
     if error == ENOENT || error == ENOTDIR {
-        return "尚未生成本地微信消息资料。请先正常登录官方 Mac 微信，向文件传输助手发送一条连接测试消息，再回到向导重新检查。"
+        return "本地资料尚未生成。监听就绪后登录，程序会自动等待并验证，无需预先登录或发送测试消息。"
     }
     if error == EPERM || error == EACCES {
         return "实际取钥工具尚不能读取微信数据库。请为当前安装版开启完整磁盘访问权限，点击权限帮助中的「重新连接」后检查；已有授权可能因开发版签名变化失效。"
@@ -253,6 +256,12 @@ func captureFailureMessage(_ failure: String) -> String {
         return "取钥监听准备报错，尚未到达登录步骤；官方客户端已恢复。请查看任务诊断中的失败阶段。"
     case "wechat_process_exited":
         return "微信在取钥期间退出，未连接未经准备的新进程；官方客户端已恢复，请重新开始。"
+    case "database_initialization_timed_out":
+        return "登录后的本地资料未在等待期限内准备完成（最长两分钟），未保存密钥；官方客户端已恢复。请稍后重试，无需发送测试消息。"
+    case "capture_account_ambiguous":
+        return "本次微信进程打开了多个账号目录，无法确认密钥归属；未保存密钥，官方客户端已恢复。"
+    case "unsafe_capture_account":
+        return "本次账号目录未通过安全检查，未保存密钥；官方客户端已恢复。"
     case "candidate_verification_failed":
         return "候选未通过所选账号数据库校验，未保存密钥；官方客户端已恢复，请检查所选账号。"
     case "wechat_suspended_launch_failed":
@@ -289,7 +298,6 @@ func runCaptureJob(_ path: String, recoverOnly: Bool = false) throws {
     var modified = false
     var keyReady = FileManager.default.fileExists(atPath: pending)
     var failure = ""
-    var observedRoots: [String] = []
     let deadline = Date().addingTimeInterval(600)
     do {
     if recoverOnly {
@@ -297,7 +305,14 @@ func runCaptureJob(_ path: String, recoverOnly: Bool = false) throws {
         modified = true
     } else {
         journal.write("permissions", "正在检查实际系统任务的客户端访问权限")
-        let preflight = capturePreflight(checkApplicationAccess: true)
+        guard let user = getpwuid(uid) else { throw ToolError.invalid("invalid_capture_owner") }
+        let userHome = URL(fileURLWithPath: String(cString: user.pointee.pw_dir), isDirectory: true)
+        let base = userHome.appendingPathComponent("Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files")
+        let expected = (request?["db_root"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        guard expected != nil || request?["account_mode"] as? String == "login"
+        else { throw ToolError.invalid("capture_account_missing") }
+        if let expected { _ = try validatedCaptureRoot(expected, base: base) }
+        let preflight = capturePreflight(dbRoot: expected, checkApplicationAccess: true, userHome: userHome)
         guard preflight["application_manageable"] as? Bool == true else {
             throw ToolError.invalid("application_management_denied")
         }
@@ -316,8 +331,6 @@ func runCaptureJob(_ path: String, recoverOnly: Bool = false) throws {
             try requireSystem("/usr/bin/codesign", ["--force", "--deep", "--sign", "-", app], code: "wechat_temporary_sign_failed")
             journal.write("preparing_listener", "正在准备取钥监听，完成后微信会自动打开；无需操作。", ["can_cancel": true])
             let targetPID = try startSuspendedWeChat(uid, directory: directory)
-            let inventory = try DatabaseSaltInventory(root: directory.appendingPathComponent("samples"))
-            guard !inventory.entries.isEmpty else { throw ToolError.invalid("database_samples_missing") }
             var capture = LLDBPassphraseCapture(lldbPath: lldbExecutable()!)
             capture.isCancelled = {
                 FileManager.default.fileExists(atPath: cancel) || ownerPID <= 1 || kill(ownerPID, 0) != 0
@@ -327,7 +340,7 @@ func runCaptureJob(_ path: String, recoverOnly: Bool = false) throws {
             capture.beforeFailureCleanup = { _ = try? stopSuspendedWeChat(uid) }
             capture.outputHandler = { message in
                 if message.contains("capture ready") {
-                    journal.write("ready_for_login", "取钥监听已就绪。现在可以点击微信登录，并完成手机确认。请登录所选数据库对应的账号。", ["can_cancel": true])
+                    journal.write("ready_for_login", "取钥监听已就绪。现在可以点击微信登录，并完成手机确认。请登录你要连接的账号；资料生成后会自动验证。", ["can_cancel": true])
                 } else if message.contains("attaching") {
                     let pid = Int(message.split(separator: " ").last ?? "") ?? 0
                     journal.write("attaching", "正在安装监听，完成后微信会自动打开；无需操作。", ["can_cancel": true, "target_pid": pid])
@@ -339,25 +352,20 @@ func runCaptureJob(_ path: String, recoverOnly: Bool = false) throws {
             }
             do {
                 let candidate = try capture.capture(processID: targetPID, timeoutSeconds: max(1, Int(deadline.timeIntervalSinceNow)))
-                var verified = 0
-                for sample in inventory.saltVerificationSamples {
-                    let derived = try SQLCipherKeyVerifier.deriveEncryptionKey(passphrase: candidate, salt: sample.salt)
-                    if try SQLCipherKeyVerifier.verify(encryptionKey: derived, page1: sample.page1) { verified += 1 }
-                }
-                if verified == inventory.distinctSalts.count && verified > 0 {
-                    journal.write("verifying", "候选密钥通过本账号数据库校验，正在恢复微信", ["verified": verified])
-                    try SecretOutputWriter().write(candidate, to: URL(fileURLWithPath: pending))
-                    _ = chown(pending, uid, gid_t.max)
-                    keyReady = true
-                } else {
-                    let roots = currentlyOpenDatabaseRoots()
-                    if let expected = request?["db_root"] as? String, !roots.isEmpty, roots != [expected] {
-                        observedRoots = roots.sorted()
-                        journal.write("account_changed", "微信当前打开的账号目录与本次选择不同，正在停止取钥并恢复官方客户端。", ["verified": verified, "total": inventory.distinctSalts.count])
-                        throw ToolError.invalid("account_changed")
-                    }
-                    throw ToolError.invalid("candidate_verification_failed")
-                }
+                journal.write("waiting_database", "正在等待微信生成本地资料并确认账号，随后自动验证；无需发送消息。", ["can_cancel": true])
+                let binding = try awaitCaptureDatabase(candidate: candidate, base: base, expected: expected,
+                    deadline: min(deadline, Date().addingTimeInterval(120)),
+                    cancelled: { capture.isCancelled?() == true },
+                    observe: { try captureDatabaseRoots(pid: targetPID, uid: uid) })
+                if capture.isCancelled?() == true { throw CaptureError.cancelled }
+                journal.write("verifying", "候选密钥通过本次账号数据库校验，正在恢复微信", ["verified": binding.verified])
+                let accountFile = directory.appendingPathComponent("verified-account.json")
+                let metadata = try JSONSerialization.data(withJSONObject: ["db_root": binding.root.path])
+                try metadata.write(to: accountFile, options: .atomic)
+                _ = chmod(accountFile.path, 0o600); _ = chown(accountFile.path, uid, gid_t.max)
+                try SecretOutputWriter().write(candidate, to: URL(fileURLWithPath: pending))
+                _ = chown(pending, uid, gid_t.max)
+                keyReady = true
             }
         } catch CaptureError.cancelled { failure = "cancelled" }
           catch CaptureError.timedOut { failure = "capture_timed_out" }
@@ -389,6 +397,10 @@ func runCaptureJob(_ path: String, recoverOnly: Bool = false) throws {
         journal.write("failed", "客户端备份未完成，未修改微信。请检查可用空间和权限后重试。", ["error": "backup_failed", "official_restored": true])
         return
     }
+    if !keyReady {
+        try? FileManager.default.removeItem(atPath: pending)
+        try? FileManager.default.removeItem(at: directory.appendingPathComponent("verified-account.json"))
+    }
     if modified {
         journal.write("restoring", "正在解除调试并恢复官方微信客户端")
         do {
@@ -418,5 +430,5 @@ func runCaptureJob(_ path: String, recoverOnly: Bool = false) throws {
     }
     journal.write(keyReady ? "captured" : (failure == "cancelled" ? "cancelled" : (recoverOnly ? "recovered" : "failed")),
                   keyReady ? "官方客户端已恢复，正在准备安全保存密钥" : (recoverOnly ? "官方客户端已恢复" : captureFailureMessage(failure)),
-                  ["key_ready": keyReady, "official_restored": true, "error": failure, "observed_db_roots": observedRoots])
+                  ["key_ready": keyReady, "official_restored": true, "error": failure])
 }

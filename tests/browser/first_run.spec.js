@@ -110,8 +110,8 @@ test("missing prerequisites are actionable and never enable capture", async ({
               id: "database",
               title: "本地消息资料",
               ok: false,
-              action: "wechat",
-              message: "请先正常登录官方 Mac 微信并发送连接测试消息。",
+              action: "privacy",
+              message: "读取权限尚未确认，请允许完整磁盘访问；无需先登录。",
             },
           ],
         },
@@ -120,7 +120,9 @@ test("missing prerequisites are actionable and never enable capture", async ({
   );
   await page.locator("#first-connect").click();
   await page.locator("#capture-check").click();
-  await expect(page.locator("#capture-checks")).toContainText("先正常登录");
+  await expect(page.locator("#capture-checks")).toContainText(
+    "读取权限尚未确认",
+  );
   await expect(
     page.getByRole("link", { name: "获取 Apple 开发工具" }),
   ).toBeVisible();
@@ -160,6 +162,23 @@ test("first-run automatic listener leads to verified completion and session setu
     "现在登录",
   );
   await expect(page.locator("#capture-progress")).toContainText("监听已就绪");
+  await page.route("**/api/job?id=listener-ready", (route) =>
+    route.fulfill({
+      json: {
+        status: "completed",
+        result: {
+          phase: "waiting_database",
+          message: "正在等待本地资料，无需发送消息",
+        },
+      },
+    }),
+  );
+  await expect(page.locator("#capture-task h2")).toHaveText(
+    "正在等待资料并确认账号",
+  );
+  await expect(page.locator("#capture-timeline .current")).toContainText(
+    "验证",
+  );
   await page.unroute("**/api/settings");
   await page.unroute("**/api/action/account-status");
   await page.unroute("**/api/job?id=fresh-account");
@@ -188,4 +207,128 @@ test("first-run automatic listener leads to verified completion and session setu
   await preview(page, "first-run-complete");
   await page.locator("#continue-setup").click();
   await expect(page.locator("#chat-query")).toBeVisible();
+});
+
+test("fresh account captures with no root and never reuses the old active account", async ({
+  page,
+}) => {
+  await page.route("**/api/action/connection-check", (route) =>
+    route.fulfill({ status: 202, json: { job_id: "new-login" } }),
+  );
+  await page.route("**/api/job?id=new-login", (route) =>
+    route.fulfill({
+      json: {
+        status: "completed",
+        result: {
+          ready: true,
+          db_root: "",
+          account_mode: "login",
+          account_label: "登录时自动识别",
+          accounts: [],
+          checks: [
+            "官方微信",
+            "取钥兼容范围",
+            "调试工具",
+            "微信资料读取权限",
+            "本地消息资料",
+            "本次连接账号",
+          ].map((title, i) => ({
+            id: String(i),
+            title,
+            ok: true,
+            message:
+              i === 4 ? "登录后自动等待资料生成并验证" : "合成检查已通过",
+          })),
+        },
+      },
+    }),
+  );
+  let payload;
+  await page.route("**/api/action/capture-start", (route) => {
+    payload = route.request().postDataJSON();
+    return route.fulfill({ status: 202, json: { job_id: "synthetic-start" } });
+  });
+  await page.route("**/api/job?id=synthetic-start", (route) =>
+    route.fulfill({
+      json: {
+        status: "completed",
+        result: { capture_id: "synthetic", phase: "preparing_listener" },
+      },
+    }),
+  );
+  await page.locator("#first-connect").click();
+  await expect(page.locator("#capture-preparation")).toContainText(
+    "无需提前登录或发送消息",
+  );
+  await page.locator("#capture-check").click();
+  await expect(page.locator("#selected-account")).toContainText(
+    "登录时自动识别",
+  );
+  await expect(page.locator("#db-root")).toHaveValue("");
+  await preview(page, "first-run-new-account");
+  await page.locator("#capture-start").click();
+  await page.locator("#confirm-yes").click();
+  await expect
+    .poll(() => payload)
+    .toEqual({ db_root: "", discover_account: true });
+});
+
+test("multiple historical accounts offer a visible choice and login-other option", async ({
+  page,
+}) => {
+  const accounts = [
+    { label: "历史甲", db_root: "/example/a/db_storage" },
+    { label: "历史乙", db_root: "/example/b/db_storage" },
+  ];
+  let choice = {};
+  await page.route("**/api/action/connection-check", (route) => {
+    choice = route.request().postDataJSON();
+    return route.fulfill({ status: 202, json: { job_id: "choose-account" } });
+  });
+  await page.route("**/api/job?id=choose-account", (route) =>
+    route.fulfill({
+      json: {
+        status: "completed",
+        result: {
+          ready:
+            !!choice.discover_account || choice.db_root === accounts[1].db_root,
+          db_root: choice.db_root === accounts[1].db_root ? choice.db_root : "",
+          account_mode: choice.discover_account ? "login" : "existing",
+          account_label: choice.discover_account
+            ? "登录时自动识别"
+            : "请选择账号",
+          accounts,
+          checks: [
+            {
+              id: "account",
+              title: "本次连接账号",
+              ok:
+                !!choice.discover_account ||
+                choice.db_root === accounts[1].db_root,
+              message: "请选择要连接的历史账号，或选择登录其他账号。",
+            },
+          ],
+        },
+      },
+    }),
+  );
+  await page.locator("#first-connect").click();
+  await page.locator("#capture-check").click();
+  await expect(page.locator("#capture-start")).toBeDisabled();
+  await expect(page.locator("#capture-account-choice")).toBeVisible();
+  await preview(page, "first-run-account-choice");
+  await page
+    .locator("#capture-account-choice")
+    .selectOption(accounts[1].db_root);
+  await expect(page.locator("#capture-start")).toBeEnabled();
+  await expect(page.locator("#db-root")).toHaveValue(accounts[1].db_root);
+  await page.locator("#capture-account-choice").selectOption("__login__");
+  await expect(page.locator("#selected-account")).toContainText(
+    "登录时自动识别",
+  );
+  await expect(page.locator("#db-root")).toHaveValue("");
+  await page.locator("#capture-check").click();
+  await expect
+    .poll(() => choice)
+    .toEqual({ db_root: "", discover_account: true });
 });

@@ -1096,3 +1096,7 @@ footer {
 .journey li:not(.current) span {
   display: none;
 }
+
+.capture-account-picker {
+  margin: 24px 0;
+}

@@ -12,7 +12,7 @@ from pathlib import Path
 from .branding import dsh_storage
 
 
-def check_first_connection(controller, requested_root=""):
+def check_first_connection(controller, requested_root="", discover_account=False):
     """Read-only checks; never launch authorization, a debugger, or a capture job."""
     import errno
 
@@ -27,10 +27,17 @@ def check_first_connection(controller, requested_root=""):
     chosen = (
         active[0] if len(active) == 1 else accounts[0] if len(accounts) == 1 else None
     )
+    login_account = bool(discover_account) or (
+        not requested_root and not accounts and not denied
+    )
     root = (
-        str(Path(requested_root).expanduser().resolve())
-        if requested_root
-        else (chosen["db_root"] if chosen else "")
+        ""
+        if login_account
+        else (
+            str(Path(requested_root).expanduser().resolve())
+            if requested_root
+            else (chosen["db_root"] if chosen else "")
+        )
     )
     request = {"operation": "connection_preflight"}
     if root:
@@ -86,45 +93,81 @@ def check_first_connection(controller, requested_root=""):
         else "请安装适用的 Apple Xcode 并完成首次打开；macOS 27 需要 LLDB 2000 或以上，旧版命令行工具可能不适用。安装后重新检查。",
         "xcode",
     )
+    access_ready = not denied and native.get(
+        "data_access_ready", native.get("database_readable", False)
+    )
     check(
         "access",
         "微信资料读取权限",
-        not denied,
-        "未发现权限拒绝；有本地数据库后还会再次验证"
-        if not denied
+        access_ready,
+        "已确认读取权限"
+        if access_ready
         else "请在完整磁盘访问权限允许本应用。列表中没有时，将权限帮助窗口中的应用图标拖入列表，开启后点「重新连接」。",
         "privacy",
     )
     initialized = bool(root) and native.get("database_readable", False)
-    check(
-        "database",
-        "本地消息资料",
-        initialized,
-        "已找到可读取的账号数据库"
-        if initialized
-        else "请先正常登录官方 Mac 微信，向文件传输助手发送「NoteBridge 连接测试」，再重新检查。首次登录和同步不由取钥工具代办。",
-        "wechat",
+    needs_choice = not login_account and not root and not denied
+    if not access_ready:
+        database_message = (
+            "读取权限尚未确认，暂时不能判断本地资料状态；无需先登录或发送消息。"
+        )
+    elif login_account:
+        database_message = (
+            "登录后自动等待微信生成本地资料并验证，无需预先登录或发送测试消息。"
+        )
+    elif needs_choice:
+        database_message = "已找到多个历史账号，请在下方选择；也可以连接其他账号。"
+    elif initialized:
+        database_message = "已有本地数据库，可直接开始取钥，无需先登录。"
+    elif native.get("database_access_errno") not in {
+        None,
+        0,
+        errno.ENOENT,
+        errno.ENOTDIR,
+    }:
+        database_message = (
+            native.get("permission_hint")
+            or "所选数据库读取出现错误，请检查目录与运行诊断。"
+        )
+    else:
+        database_message = "所选目录尚未生成完整资料，登录该账号后将自动等待并验证。"
+    missing_database = native.get("database_access_errno") in {
+        None,
+        0,
+        errno.ENOENT,
+        errno.ENOTDIR,
+    }
+    database_ok = access_ready and (
+        login_account or bool(root) and (initialized or missing_database)
     )
-    same_account = bool(root) and (
-        not active
-        or len(active) == 1
-        and Path(active[0]["db_root"]).resolve() == Path(root).resolve()
+    check("database", "本地消息资料", database_ok, database_message)
+    account_ok = access_ready and (login_account or bool(root))
+    label = (
+        "登录时自动识别"
+        if login_account
+        else next(
+            (a["label"] for a in accounts if a["db_root"] == root), "已选择账号目录"
+        )
+        if root
+        else "请选择账号"
     )
-    check(
-        "account",
-        "本次连接账号",
-        same_account,
-        (chosen["label"] if chosen and chosen["db_root"] == root else "已选择账号目录")
-        if same_account
-        else "请正常登录本次要连接的账号后重新检查；有多个历史账号时也可在高级选项手动选择。",
+    message = (
+        "监听准备好后登录你要连接的账号，程序自动识别本次账号。"
+        if login_account
+        else label + "；取钥时登录这个账号即可，无需提前登录。"
+        if root
+        else "请选择下方的历史账号，或选择「登录其他账号」。"
     )
+    if not access_ready:
+        message = "授权后自动识别本机账号；无需预先登录。"
+    check("account", "本次连接账号", account_ok, message)
     return {
         "ready": all(c["ok"] for c in checks),
         "checks": checks,
         "db_root": root,
-        "account_label": chosen["label"]
-        if chosen and chosen["db_root"] == root
-        else "",
+        "account_label": label,
+        "account_mode": "login" if login_account else "existing",
+        "needs_account_choice": needs_choice,
         "accounts": accounts,
         "native": native,
     }

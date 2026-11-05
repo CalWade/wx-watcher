@@ -281,7 +281,7 @@ function accountPanelHTML(framed = true) {
   const r = accountReport;
   const rows = r?.accounts || [];
   const hasSaved = settings.profiles?.length > 0;
-  return `<section id="account-panel" ${framed ? 'class="card"' : ""}><h2>微信账号</h2><div class="account-summary"><div><span class="label">微信当前登录</span><strong id="wechat-current-account">${escape(r?.current?.label || "尚未识别，请登录微信后刷新")}</strong></div><div><span class="label">NoteBridge 已连接</span><strong id="project-selected-account">${escape(r?.selected?.label || "尚未连接")}</strong></div></div><p id="account-message" class="${r?.matches_current ? "success" : "note"}">${escape(r?.message || "正在识别账号…")}</p><div class="actions">${r?.code === "unavailable" ? '<button id="account-privacy" class="primary">允许读取微信资料</button>' : ""}${(!hasSaved || !r?.current) && page === "setup" ? `<button id="first-connect" class="${r?.code === "unavailable" ? "" : "primary"}">${hasSaved ? "检查微信连接" : "首次连接微信"}</button>` : ""}${r?.current && (hasSaved || page !== "setup") ? `<button id="use-current-account" class="${r.matches_current || page === "keytool" ? "" : "primary"}">${r.current.credential_saved ? (r.matches_current ? "验证当前账号" : "验证并切换到当前账号") : "连接当前账号"}</button>` : ""}<button id="refresh-accounts" class="text-button">刷新账号</button></div><details id="account-list"><summary id="account-toggle">已发现的账号 · ${rows.length}</summary>${rows.map((a, i) => `<div class="row"><div class="grow"><strong>${escape(a.label)}</strong><p class="muted">${a.active ? "微信当前登录 · " : "历史账号资料 · "}${a.credential_saved ? "密钥已保存" : "尚无密钥"}${a.selected ? " · 本项目正在使用" : ""}</p></div><button data-account-index="${i}" ${a.active ? "" : "disabled"}>${a.credential_saved ? "验证并使用" : "连接此账号"}</button></div>`).join("")}<p class="muted">更换账号请先在微信登录，再回来刷新。每个账号分别保存凭据。</p></details></section>`;
+  return `<section id="account-panel" ${framed ? 'class="card"' : ""}><h2>微信账号</h2><div class="account-summary"><div><span class="label">微信当前登录</span><strong id="wechat-current-account">${escape(r?.current?.label || "尚未识别，请登录微信后刷新")}</strong></div><div><span class="label">NoteBridge 已连接</span><strong id="project-selected-account">${escape(r?.selected?.label || "尚未连接")}</strong></div></div><p id="account-message" class="${r?.matches_current ? "success" : "note"}">${escape(r?.message || "正在识别账号…")}</p><div class="actions">${r?.code === "unavailable" ? '<button id="account-privacy" class="primary">允许读取微信资料</button>' : ""}${(!hasSaved || !r?.current) && page === "setup" ? `<button id="first-connect" class="${r?.code === "unavailable" ? "" : "primary"}">${hasSaved ? "检查微信连接" : "首次连接微信"}</button>` : ""}${r?.current && (hasSaved || page !== "setup") ? `<button id="use-current-account" class="${r.matches_current || page === "keytool" ? "" : "primary"}">${r.current.credential_saved ? (r.matches_current ? "验证当前账号" : "验证并切换到当前账号") : "连接当前账号"}</button>` : ""}<button id="refresh-accounts" class="text-button">刷新账号</button></div><details id="account-list"><summary id="account-toggle">已发现的账号 · ${rows.length}</summary>${rows.map((a, i) => `<div class="row"><div class="grow"><strong>${escape(a.label)}</strong><p class="muted">${a.active ? "微信当前登录 · " : "历史账号资料 · "}${a.credential_saved ? "密钥已保存" : "尚无密钥"}${a.selected ? " · 本项目正在使用" : ""}</p></div><button data-account-index="${i}" ${a.active ? "" : "disabled"}>${a.credential_saved ? "验证并使用" : "连接此账号"}</button></div>`).join("")}<p class="muted">首次连接可在取钥向导选择历史账号，或登录其他账号。每个账号分别保存凭据。</p></details></section>`;
 }
 function updateAccountActions() {
   const matches = accountReport?.matches_current === true;
@@ -794,13 +794,20 @@ function captureTimeline(phase) {
       "无需操作；监听装好后微信会自动打开",
     ],
     [
-      "现在登录同一个账号",
+      "现在登录要连接的账号",
       ["ready_for_login", "waiting"],
       "微信打开后，扫码或点击登录并完成手机确认",
     ],
     [
       "验证、恢复与保存",
-      ["verifying", "account_changed", "restoring", "captured", "completed"],
+      [
+        "waiting_database",
+        "verifying",
+        "account_changed",
+        "restoring",
+        "captured",
+        "completed",
+      ],
       "成功必须通过数据库验证、恢复官方客户端并保存 Keychain",
     ],
   ];
@@ -822,13 +829,13 @@ function keytool() {
   const target =
     pendingAccount ||
     (!accountReport?.matches_current ? accountReport?.current : null);
-  const root =
-    report?.db_root ||
-    target?.db_root ||
-    (accountReport?.matches_current || captureProgress?.phase === "completed"
-      ? profile?.db_root
-      : "") ||
-    "";
+  const root = report
+    ? report.db_root
+    : target?.db_root ||
+      (accountReport?.matches_current || captureProgress?.phase === "completed"
+        ? profile?.db_root
+        : "") ||
+      "";
   const targetIsSaved = profile && root === profile.db_root;
   const active = !!activeCaptureId;
   const completed = targetIsSaved && captureProgress?.phase === "completed";
@@ -844,20 +851,43 @@ function keytool() {
   $("#content").innerHTML =
     `<div class="account-strip"><button id="back-to-setup" class="text-button">← 返回接入设置</button><span id="selected-account">本次取钥目标：${escape(report?.account_label || target?.label || profile?.label || "检查时自动识别")}</span></div><div class="capture-layout"><ol id="capture-timeline" class="journey" aria-label="微信连接进度">${captureTimeline(phase)}</ol><div class="capture-main">
     <section class="card" id="capture-task">
-      <div class="step-heading"><h2>${active ? "按提示完成微信登录" : completed || alreadyConnected ? "微信连接已完成" : report?.ready ? "检查通过，可以连接" : "首次连接微信 · 取钥向导"}</h2><p>${active ? "请留在这个向导，下一步操作会在这里明确提示。" : completed || alreadyConnected ? "凭据已安全保存，可以继续选择会话。" : report?.ready ? "准备好暂时中断微信使用后，再开始取钥。" : "先检查这台 Mac，确认账号、读取权限与兼容条件。"}</p></div>
+      <div class="step-heading"><h2>${active ? "按提示完成微信登录" : completed || alreadyConnected ? "微信连接已完成" : report?.ready ? "检查通过，可以连接" : "首次连接微信 · 取钥向导"}</h2><p>${active ? "请留在这个向导，下一步操作会在这里明确提示。" : completed || alreadyConnected ? "凭据已安全保存，可以继续选择会话。" : report?.ready ? (report.account_mode === "login" ? "监听准备好后再登录，随后自动识别账号并验证资料。" : "准备好暂时中断微信使用后，再开始取钥。") : "先检查这台 Mac，确认账号、读取权限与兼容条件。"}</p></div>
       <div id="capture-preparation" ${active || completed || alreadyConnected ? "hidden" : ""}>
-        ${report ? "" : '<p class="muted">请先正常登录 Mac 微信，并向文件传输助手发送一条消息，让资料保存到本机。检查只读取环境信息。</p>'}
+        ${report ? "" : '<p class="muted">无需提前登录或发送消息。先检查环境，监听就绪后再按提示登录；已有资料会自动识别，新账号的资料会在登录后自动发现。</p>'}
         <div id="capture-checks" aria-live="polite">${report?.ready ? `<details><summary>✓ ${checks.length} 项检查全部通过 · 查看详情</summary>${checksHTML}</details>` : checksHTML}</div>
+        ${report?.accounts?.length ? `<label class="capture-account-picker">要连接的账号<select id="capture-account-choice"><option value="" ${!root && report.account_mode !== "login" ? "selected" : ""} disabled>请选择账号</option>${report.accounts.map((a) => `<option value="${escape(a.db_root)}" ${root === a.db_root ? "selected" : ""}>${escape(a.label)}${a.active ? " · 当前登录" : " · 历史资料"}</option>`).join("")}<option value="__login__" ${report.account_mode === "login" ? "selected" : ""}>登录其他账号（自动识别）</option></select></label>` : ""}
         <div class="actions"><button id="capture-check" class="${report?.ready ? "" : "primary"}">${report ? "重新检查" : "检查并识别微信账号"}</button><button id="capture-start" class="primary" ${report?.ready ? "" : "disabled"} ${!report?.ready ? "hidden" : ""}>授权并开始取钥</button></div>
         ${report?.ready ? '<p class="note">这一步会备份微信、临时重签并连接调试器，结束后恢复官方客户端。需要系统授权；首次取钥无法保证零风控风险。</p>' : ""}
       </div>
       <div id="capture-live" ${active || (captureProgress && !completed) ? "" : "hidden"}><p id="capture-progress" class="note" role="status">${escape(captureProgress?.message || "正在准备，请稍候…")}</p><div class="actions"><button id="capture-login-ready" class="primary" hidden>我已停在登录页，准备监听</button><button id="capture-cancel" class="text-button" disabled>取消并恢复</button></div></div>
-      ${targetIsSaved ? `<div id="credential-result" class="${completed ? "" : "subsection"}"><div class="row"><strong>${escape(profile.label)}</strong><span class="pill ok">Keychain 已保存</span></div><p class="muted">${escape(profile.verification?.verified || 0)} / ${escape(profile.verification?.total || 0)} 份数据库已验证。请在恢复后的官方微信中正常登录，再继续。</p><div class="actions"><button id="continue-setup" class="primary">下一步：选择会话</button>${button("验证当前凭据", "verify-key")}</div>${!active && !completed && !requestRecapture ? '<div class="subsection"><button id="recapture" class="text-button">需要重新获取凭据？</button></div>' : ""}</div>` : ""}
+      ${targetIsSaved ? `<div id="credential-result" class="${completed ? "" : "subsection"}"><div class="row"><strong>${escape(profile.label)}</strong><span class="pill ok">Keychain 已保存</span></div><p class="muted">${escape(profile.verification?.verified || 0)} / ${escape(profile.verification?.total || 0)} 份数据库已验证。请在恢复后的官方微信中正常登录，再继续。</p><div class="actions"><button id="continue-setup" class="primary">下一步：选择会话</button>${button("验证当前凭据", "verify-key")}</div>${!active && !completed && !requestRecapture ? '<div class="subsection"><button id="recapture" class="text-button">需要重新获取凭据？</button><button id="connect-other-account" class="text-button">连接其他账号</button></div>' : ""}</div>` : ""}
     </section>
     <details class="card" id="permission-options"><summary>权限帮助</summary><p class="muted">在系统设置中允许 NoteBridge 读取微信资料。列表中没有应用时，将权限帮助窗口中的图标拖入列表，开启后点击「重新连接」。</p><div class="actions"><button id="open-privacy">完整磁盘访问设置</button><button id="open-app-management">App 管理设置</button></div></details>
   </div></div>
   <details id="existing-options" class="card"><summary>已有密钥或备份 · 手动导入</summary><p class="muted">首次连接无需填写路径。已有凭据可在这里导入；不要将密钥粘贴到聊天或日志。</p><div class="form"><label>数据库目录<div class="field-action"><input id="db-root" value="${escape(root)}" placeholder="自动识别或选择 db_storage 目录"><button id="pick-root">选择目录</button></div></label><div><button id="find-accounts">识别本机账号</button><div id="account-choices" class="choice-list"></div></div><label>密钥文件<div class="field-action"><input id="key-file" placeholder="选择现有密钥文件"><button id="pick-key">选择文件</button></div></label>${field("账号备注", "profile-label", report?.account_label || target?.label || profile?.label || "")}</div><div class="actions"><button id="import-key" class="primary">验证并保存凭据</button></div><div class="subsection"><h3>加密备份与恢复</h3><p class="muted">请单独保管备份口令，工具不会保存它。</p>${field("备份 / 恢复口令 · 至少 12 个字符", "backup-password", "", "password")}<div class="actions"><button id="backup-key" ${targetIsSaved ? "" : "disabled"}>下载当前凭据备份</button><button id="restore-key">导入加密备份</button><input id="backup-file" type="file" accept=".json" hidden></div></div></details>
   <details class="card" id="capture-history"><summary>历史取钥任务与恢复</summary><p class="muted">中断的任务可在这里继续。如恢复未完成，请先恢复官方客户端。</p><button id="refresh-captures">刷新任务</button><div id="capture-sessions"></div></details>`;
+  const checkTarget = async (db_root, discover_account = false) => {
+    captureReadiness = await action(
+      "connection-check",
+      { db_root, discover_account },
+      "检查首次连接条件",
+    );
+    $("#job-dialog").close();
+    render();
+  };
+  const accountChoice = $("#capture-account-choice");
+  if (accountChoice)
+    accountChoice.onchange = () =>
+      checkTarget(
+        accountChoice.value === "__login__" ? "" : accountChoice.value,
+        accountChoice.value === "__login__",
+      ).catch((e) => notice(e.message, true));
+  bind("connect-other-account", async () => {
+    requestRecapture = true;
+    captureProgress = null;
+    pendingAccount = null;
+    await checkTarget("", true);
+  });
   bind("recapture", () => {
     requestRecapture = true;
     captureReadiness = null;
@@ -898,7 +928,7 @@ function keytool() {
     );
     if (!rows.length)
       notice(
-        "未找到可读取的微信数据，请先正常登录 Mac 微信并检查数据访问权限。",
+        "未发现已有账号资料。请使用上方环境检查；权限就绪后可直接连接，登录后会自动发现资料。",
       );
   });
   bind("refresh-captures", loadCaptureSessions);
@@ -934,13 +964,7 @@ function keytool() {
     navigate("setup");
   });
   bind("capture-check", async () => {
-    captureReadiness = await action(
-      "connection-check",
-      { db_root: $("#db-root").value },
-      "检查首次连接条件",
-    );
-    $("#job-dialog").close();
-    render();
+    await checkTarget($("#db-root").value, report?.account_mode === "login");
   });
   bind("capture-start", async () => {
     if (
@@ -951,7 +975,10 @@ function keytool() {
       return;
     const result = await action(
       "capture-start",
-      { db_root: $("#db-root").value },
+      {
+        db_root: $("#db-root").value,
+        discover_account: captureReadiness?.account_mode === "login",
+      },
       "准备取钥会话",
     );
     $("#job-dialog").close();
@@ -1108,6 +1135,7 @@ function watchCapture(id) {
           attached: "正在准备监听，无需操作",
           armed: "监听已安装，正在打开微信",
           restoring: "正在恢复官方微信",
+          waiting_database: "正在等待资料并确认账号",
           verifying: "正在验证凭据",
           captured: "正在安全保存凭据",
         }[progress.phase] || "正在处理，请按提示操作";

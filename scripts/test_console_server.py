@@ -117,6 +117,14 @@ class FixtureController(Controller):
                 "ready": True,
                 "db_root": "/example/db_storage",
                 "account_label": "合成当前账号",
+                "account_mode": "existing",
+                "accounts": [
+                    {
+                        "label": "合成当前账号",
+                        "db_root": "/example/db_storage",
+                        "active": True,
+                    }
+                ],
                 "checks": [
                     {"id": id, "title": title, "ok": True, "message": message}
                     for id, title, message in [

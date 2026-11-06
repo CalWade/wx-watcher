@@ -2,7 +2,7 @@
 
 import unittest
 
-from scripts.dev import acceptance
+from scripts.dev import acceptance, retain_failure_logs
 
 
 class FullApplicationIntegrationTests(unittest.TestCase):
@@ -50,6 +50,9 @@ class ProductionProcessIntegrationTests(unittest.TestCase):
                 time.sleep(1)
                 self.assertEqual(sandbox.peers.values["submissions"], count)
                 self.assertEqual(len(sandbox.controller.tasks.recent()), 1)
+            except Exception:
+                retain_failure_logs(Path(tmp))
+                raise
             finally:
                 services.stop()
                 services.shutdown_event.set()

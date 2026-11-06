@@ -63,7 +63,8 @@ def build_desktop(
 
     registry = agent_registry(
         lambda options: DshGateway(
-            legacy_client() if legacy_client else model_client(), prepare_agent
+            prepare=prepare_agent,
+            client_factory=legacy_client or model_client,
         ),
     )
 

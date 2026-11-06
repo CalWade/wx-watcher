@@ -42,6 +42,7 @@ class OnboardingTests(unittest.TestCase):
         self.c.accounts = Mock(side_effect=AssertionError("unrelated account step"))
         self.c.feishu = Mock(side_effect=AssertionError("unrelated destination step"))
         self.c.install_dsh = Mock(return_value={"ready": True})
+        self.c.dsh = Mock(side_effect=AssertionError("client read before preparation"))
         with patch(
             "wx_watcher.onboarding.prepare_dsh", return_value={"installed": True}
         ):
@@ -50,6 +51,7 @@ class OnboardingTests(unittest.TestCase):
         self.assertTrue(all(c["ok"] for c in result["checks"]))
         self.c.accounts.assert_not_called()
         self.c.feishu.assert_not_called()
+        self.c.dsh.assert_not_called()
 
     def test_changed_feishu_transport_cannot_keep_the_old_destination(self):
         self.c.services.running = Mock(return_value=False)

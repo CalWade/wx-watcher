@@ -6,9 +6,18 @@ from ...domain.agents import AgentJob
 class DshGateway:
     provider_id = "dsh"
 
-    def __init__(self, client, prepare=None):
-        self.client = client
+    def __init__(self, client=None, prepare=None, *, client_factory=None):
+        self._client = client
+        self._client_factory = client_factory
         self._prepare = prepare
+
+    @property
+    def client(self):
+        if self._client is None:
+            if self._client_factory is None:
+                raise RuntimeError("Agent 连接尚未配置")
+            self._client = self._client_factory()
+        return self._client
 
     def prepare(self):
         if self._prepare is not None:

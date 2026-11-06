@@ -174,6 +174,18 @@ def current():
     return descriptor
 
 
+def retain_failure_logs(directory):
+    destination = ROOT / "output/checks/development-failures" / directory.name
+    destination.mkdir(parents=True, exist_ok=True)
+    for file in directory.rglob("*.log"):
+        target = destination / file.relative_to(directory)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with file.open("rb") as source:
+            source.seek(max(0, file.stat().st_size - 128000))
+            target.write_bytes(source.read())
+        target.chmod(0o600)
+
+
 def up(port, encrypted=True, *, register=True):
     from wx_watcher.appstate import atomic_json
 
@@ -225,6 +237,7 @@ def up(port, encrypted=True, *, register=True):
         process.terminate()
         process.wait(timeout=20)
         OWNED_PROCESSES.pop(process.pid, None)
+        retain_failure_logs(directory)
         raise
 
 

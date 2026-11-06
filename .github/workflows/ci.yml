@@ -36,6 +36,7 @@ jobs:
             output/verification.json
             output/coverage/coverage.json
             output/coverage/coverage.xml
+            test-results/
   interface:
     runs-on: ubuntu-latest
     timeout-minutes: 10

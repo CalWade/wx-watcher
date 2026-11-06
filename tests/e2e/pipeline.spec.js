@@ -16,6 +16,22 @@ async function choose(page, step) {
     "step",
   );
 }
+async function clickAction(page, operation) {
+  const completed = page.waitForResponse(
+    async (response) => {
+      if (new URL(response.url()).pathname !== "/api/job") return false;
+      const job = await response.json();
+      return job.operation === operation && job.status !== "running";
+    },
+    { timeout: 30000 },
+  );
+  const [response] = await Promise.all([
+    completed,
+    page.locator(`[data-op="${operation}"]`).click(),
+  ]);
+  const job = await response.json();
+  expect(job.status, job.error).toBe("completed");
+}
 
 test("real application pipeline supports offline setup, delivery, restart and failed-agent review", async ({
   page,
@@ -67,9 +83,9 @@ test("real application pipeline supports offline setup, delivery, restart and fa
   expect(snapshot.messages[1].body.content).toContain("浏览器完整流程验收");
   expect(snapshot.tasks[0].agent.provider_id).toBe("http");
   expect(snapshot.submissions).toBe(2);
-  await page.locator('[data-op="stop"]').click();
+  await clickAction(page, "stop");
   await expect(page.locator('[data-op="start"]')).toBeVisible();
-  await page.locator('[data-op="start"]').click();
+  await clickAction(page, "start");
   await expect(page.locator('[data-op="stop"]')).toBeVisible();
   await sandbox(page, "emit", { text: "123456" });
   await expect
@@ -96,7 +112,7 @@ test("real application pipeline supports offline setup, delivery, restart and fa
     )
     .toBe(1);
   expect((await sandbox(page, "status")).messages).toHaveLength(2);
-  await page.locator('[data-op="stop"]').click();
+  await clickAction(page, "stop");
   await expect(page.locator('[data-op="start"]')).toBeVisible();
   const queued = (await sandbox(page, "status")).tasks.filter(
     (t) => t.status === "queued" || t.status === "inference",

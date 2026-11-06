@@ -5,6 +5,8 @@ module.exports = defineConfig({
   use: {
     baseURL: "http://127.0.0.1:19768",
     browserName: "chromium",
+    trace: "retain-on-failure",
+    screenshot: "only-on-failure",
   },
   webServer: {
     command: "uv run python scripts/dev.py serve --port 19768",

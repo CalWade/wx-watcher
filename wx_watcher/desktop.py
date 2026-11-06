@@ -12,13 +12,14 @@ import signal
 import threading
 import webbrowser
 from http.cookies import SimpleCookie
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from .appstate import AppState, app_home, atomic_json
 from .branding import BUNDLE_ID, LEGACY_BUNDLE_ID, login_file
 from .controller import Controller
+from .infrastructure.http_server import LoopbackHTTPServer
 
 
 def create_desktop(controller: Controller, token: str, port=0):
@@ -186,7 +187,7 @@ def create_desktop(controller: Controller, token: str, port=0):
                 return self.send(404, {"error": "unknown_operation"})
             return self.send(202, controller.submit(operation, data))
 
-    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    server = LoopbackHTTPServer(("127.0.0.1", port), Handler)
     server.daemon_threads = True
     return server
 

@@ -4,7 +4,7 @@ import hashlib
 import json
 import threading
 from dataclasses import replace
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 
 from test_pipeline import Fixture
 
@@ -18,6 +18,7 @@ from wx_watcher.desktop import create_desktop
 from wx_watcher.domain.agents import AgentJob
 from wx_watcher.feishu import Feishu
 from wx_watcher.infrastructure.desktop_resources import DesktopResources
+from wx_watcher.infrastructure.http_server import LoopbackHTTPServer
 from wx_watcher.reply import ReplyAgent, ReplyConfig
 from wx_watcher.source import SnapshotReader
 from wx_watcher.store import Store
@@ -195,7 +196,7 @@ def start_peers(state):
                     )
             return self.reply(404, {"error": "not_found"})
 
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server = LoopbackHTTPServer(("127.0.0.1", 0), Handler)
     server.daemon_threads = True
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()

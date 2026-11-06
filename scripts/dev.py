@@ -125,6 +125,9 @@ def action(descriptor, operation, data=None):
 
 
 def serve(directory, port, encrypted=True):
+    import faulthandler
+
+    faulthandler.dump_traceback_later(15)
     from support.sandbox import TOKEN, Sandbox
 
     from wx_watcher.appstate import atomic_json
@@ -139,6 +142,7 @@ def serve(directory, port, encrypted=True):
         "encrypted": encrypted,
     }
     atomic_json(directory / "environment.json", descriptor)
+    faulthandler.cancel_dump_traceback_later()
     print(
         json.dumps(
             {
@@ -177,6 +181,7 @@ def current():
 def retain_failure_logs(directory):
     destination = ROOT / "output/checks/development-failures" / directory.name
     destination.mkdir(parents=True, exist_ok=True)
+    destination.chmod(0o700)
     for file in directory.rglob("*.log"):
         target = destination / file.relative_to(directory)
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -234,13 +239,16 @@ def up(port, encrypted=True, *, register=True):
             time.sleep(0.1)
         raise RuntimeError("验收服务启动超时")
     except BaseException:
-        diagnostic = subprocess.run(
-            ["/bin/ps", "-p", str(process.pid), "-o", "stat=,command="],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        (directory / "startup.log").write_text(diagnostic.stdout[-2000:])
+        try:
+            diagnostic = subprocess.run(
+                ["/bin/ps", "-p", str(process.pid), "-o", "stat=,command="],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            (directory / "startup.log").write_text(diagnostic.stdout[-2000:])
+        except (OSError, subprocess.SubprocessError):
+            pass
         process.terminate()
         process.wait(timeout=20)
         OWNED_PROCESSES.pop(process.pid, None)

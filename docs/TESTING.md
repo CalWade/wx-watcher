@@ -79,6 +79,7 @@ uv run python scripts/dev.py accept
 - `output/checks/summary.json` 记录各检查阶段、退出码与耗时，阶段日志保存在同目录。
 - `output/verification.json` 记录 Python 各层数量、失败、跳过和覆盖率结果。
 - `output/coverage/coverage.json`、`coverage.xml`、`html/` 提供可追溯到测试上下文的覆盖率明细。
+- `output/checks/development-failures/` 保存有界的启动失败诊断。
 - 开发环境输出私有临时目录中的 `server.log`。开发实例记录位于 `.runtime/dev/`。
 
 报告、运行数据与数据库均在忽略目录中。公开问题和 PR 使用脱敏摘要。

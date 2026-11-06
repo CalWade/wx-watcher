@@ -293,7 +293,9 @@
       "id": "desktop",
       "title": "本地界面、导航和原生桥接边界",
       "commands": [],
-      "unit": [],
+      "unit": [
+        "unit.test_http_server.LoopbackServerUnitTests.test_binding_uses_the_assigned_numeric_address_without_reverse_dns"
+      ],
       "integration": [
         "tests/test_desktop.py"
       ],
@@ -317,7 +319,8 @@
         "unit.test_dev_tools.EnvironmentToolTests.test_missing_package_manager_produces_an_actionable_bootstrap_result",
         "unit.test_dev_tools.EnvironmentToolTests.test_check_plan_has_each_test_layer_and_a_failure_stops_later_stages",
         "unit.test_dev_tools.EnvironmentToolTests.test_missing_node_is_reported_before_installing_other_dependencies",
-        "unit.test_dev_tools.EnvironmentToolTests.test_package_check_rejects_an_unavailable_backend_before_starting_processes"
+        "unit.test_dev_tools.EnvironmentToolTests.test_package_check_rejects_an_unavailable_backend_before_starting_processes",
+        "unit.test_dev_tools.EnvironmentToolTests.test_failure_logs_are_bounded_and_saved_in_the_private_report_directory"
       ],
       "integration": [
         "tests/test_full_pipeline.py"

@@ -79,7 +79,7 @@ class FixtureController(Controller):
         self.state.profile()
 
     def perform(self, operation, data):
-        if operation == "connect-dsh":
+        if operation in {"connect-dsh", "connect-agent"}:
             return {
                 "ready": True,
                 "checks": [{"stage": "合成模型与费用连接", "ok": True}],
@@ -157,12 +157,14 @@ class FixtureController(Controller):
                 if self.capture_phase == "preparing_listener"
                 else "监听已就绪，可以登录",
             }
-        if operation == "install-dsh":
+        if operation in {"install-dsh", "prepare-agent"}:
             return {"installed": True, "ready": True}
-        if operation == "test-dsh":
+        if operation in {"test-dsh", "test-agent"}:
             return {
                 "output": "example",
                 "tools": 0,
+                "tool_count": 0,
+                "cost": {"recorded": True},
                 "cost_meter": {"found": True},
                 "usage": {"output": 5},
             }

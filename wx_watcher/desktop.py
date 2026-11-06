@@ -174,6 +174,10 @@ def create_desktop(controller: Controller, token: str, port=0):
                 "login-service",
                 "auto-connect",
                 "connect-dsh",
+                "connect-agent",
+                "prepare-agent",
+                "test-agent",
+                "agent-status",
                 "finish-setup",
                 "run-settings",
             }

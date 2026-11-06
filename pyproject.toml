@@ -31,6 +31,7 @@ build = [
     "pyinstaller>=6,<7",
 ]
 dev = [
+    "coverage>=7.17,<8",
     "ruff>=0.14,<1",
 ]
 
@@ -43,3 +44,26 @@ select = ["E4", "E7", "E9", "F", "I", "UP"]
 
 [tool.ruff.lint.per-file-ignores]
 "scripts/*.py" = ["E402"]
+
+[tool.coverage.run]
+branch = true
+source = ["wx_watcher"]
+omit = ["*/wx_watcher/_vendor/*"]
+parallel = true
+relative_files = true
+patch = ["subprocess"]
+data_file = "output/coverage/.coverage"
+context = "${NOTE_BRIDGE_COVERAGE_CONTEXT-}"
+
+[tool.coverage.report]
+omit = ["*/wx_watcher/_vendor/*"]
+show_missing = true
+precision = 2
+
+[tool.notebridge.quality]
+domain_lines = 95
+domain_branches = 90
+application_lines = 90
+application_branches = 85
+overall_lines = 80
+overall_branches = 70

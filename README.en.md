@@ -34,4 +34,18 @@ The [README](README.md) lists actually tested versions. Other builds need explic
 qualification. Selected context goes to your model provider, and suggestions go to
 your configured Feishu group. Never commit keys, customer records or unreviewed logs.
 
+## Development and verification
+
+```sh
+uv run python scripts/dev.py bootstrap --native
+uv run python scripts/dev.py accept
+uv run python scripts/check.py --lldb
+```
+
+The autonomous development environment uses synthetic SQLCipher/WAL data and local
+Agent and Feishu protocol peers. Coverage gates, feature ownership and dependency
+rules run in CI. Initial macOS permissions and actual account login require the operator.
+
+[Architecture](docs/ARCHITECTURE.md) · [Testing](docs/TESTING.md) · [Agent providers](docs/AGENT_PROVIDERS.md)
+
 [MIT](LICENSE) · [Sources](THIRD_PARTY.md) · [Security](SECURITY.md)

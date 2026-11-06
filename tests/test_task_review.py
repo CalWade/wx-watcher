@@ -51,6 +51,17 @@ class TaskReviewTests(unittest.TestCase):
 
     def test_model_retry_creates_fresh_id_and_preserves_original(self):
         self.task("needs_review")
+        legacy = self.store.task("test-task")
+        legacy.pop("agent_provider")
+        legacy["dsh"] = {"status": "failed", "session_id": "synthetic-session"}
+        self.store.save(legacy)
+        recent = self.c.records()[0]
+        self.assertEqual(recent["agent_provider"], "dsh")
+        self.assertEqual(recent["agent"]["session_ref"], "synthetic-session")
+        self.assertNotIn("dsh", recent)
+        self.assertIn(
+            '"dsh"', self.store.db.execute("SELECT body FROM tasks").fetchone()[0]
+        )
         self.c.perform("task-review", {"id": "test-task", "decision": "retry"})
         original = self.store.task("test-task")
         retry = self.store.task(original["replacement_id"])

@@ -1,60 +1,60 @@
 # 开发、测试与发布
 
-## 仓库结构
+## 环境准备
 
-- `wx_watcher/`：读取、凭据访问、任务、集成、控制台后端。
-- `wx_watcher/assets/`：本地界面，无外部 CDN。
-- `native/Sources/NoteBridgeAccess`：Keychain、备份、取钥与恢复事务。
-- `native/Sources/NoteBridgeApp`：Mac 窗口、WebView、菜单栏、原生选择器。
-- `native/Vendor`：固定版本的上游取钥子集、原始许可。
-- `integrations/dsh/`：DSH 桥接的规范源。
-- `tests/`：合成数据与 API/恢复测试。
-- `scripts/`：构建、验收、发布检查。
-- `docs/`：安装、使用、集成、维护与开发文档。
-
-## 准备
+Mac 开发使用 Python 3.12 或以上、uv、Node.js 22 或以上、SQLCipher 和 Apple 开发者工具。优先复用本机已经配置的工具。缺少基础工具时通过本机包管理器安装，首次配置 Apple 开发者工具按系统提示完成。
 
 ```sh
-uv sync --frozen --group build
-swift build --package-path native -c release
-codesign --force --sign - native/.build/release/notebridge-access
-uv run notebridge desktop
+uv run python scripts/dev.py bootstrap --native
+uv run python scripts/dev.py doctor --native
 ```
 
-独立开发数据可设置 `NOTE_BRIDGE_HOME`。不要共用正在验证的真实账号任务目录。
-不要把当前机器的绝对路径、账号 ID、机器人 ID 或私有日志加入测试。
+`bootstrap` 根据锁文件同步项目 Python 依赖、构建依赖和 Node 测试依赖，安装对应版本的测试浏览器，并可构建 Swift 程序。Mac 缺少 uv 或 SQLCipher 时复用已有 Homebrew 安装。Node.js 与 Apple 开发者工具需先就绪。
 
-## 自动检查
+Linux 开发使用系统 SQLCipher 动态库、Node.js 和 uv，省略 `--native`。浏览器需要宿主系统的运行依赖；CI 通过 Playwright 的 `--with-deps` 安装。原生 Mac 程序在 Mac 上构建与测试。
+
+## 独立开发服务
 
 ```sh
-uv run python scripts/verify.py
-swift test --package-path native -c release
-node --check wx_watcher/assets/app.js
-node --test tests/dsh/bridge.test.mjs
-npm ci
-npm test
-uv run ruff check wx_watcher scripts tests
-uv run ruff format --check wx_watcher scripts tests
-uv run python scripts/check_release.py
+uv run python scripts/dev.py up
+uv run python scripts/dev.py emit --text '培训资料什么时候发送？'
+uv run python scripts/dev.py down
 ```
 
-Python 测试通过原生 SQLCipher 生成合成加密数据库和活动 WAL；不用私人账号。
-Swift 测试覆盖取钥脚本、KDF/HMAC、秘密文件权限、解析、输入与凭据边界。
-不在 CI 自动重签或附加真实微信。图形交互通过独立浏览器会话验证本地界面。
+启动结果会给出本地浏览器地址。该环境使用临时数据目录、合成加密数据库和本地 Agent、飞书协议服务，便于 AI 自主启动、注入消息、检查结果与关闭服务。`scripts/dev.py accept` 可以自动完成一次接入、投递和重启验收。
 
-可在开发 Mac 显式运行真实 LLDB 的隔离测试（只编译并调试临时测试程序）：
+源码生产入口使用 `uv run notebridge desktop`。首次运行原生凭据工具前按 [安装说明](INSTALL.md) 构建并签名。独立开发配置可设置 `NOTE_BRIDGE_HOME`，开发目录应与个人账号数据分离。
+
+## 结构与修改规则
+
+- `wx_watcher/domain/` 保存领域规则。
+- `wx_watcher/application/` 保存用例、Worker 和依赖接口。
+- `wx_watcher/infrastructure/` 保存具体 Agent、HTTP、任务与桌面资源适配器。
+- `wx_watcher/composition.py` 组装生产依赖。
+- `wx_watcher/assets/` 保存本地界面。
+- `native/Sources/` 保存凭据、取钥、恢复与 Mac 桌面程序。
+- `integrations/dsh/` 保存 DSH 桥接的规范源。
+- `tests/unit/`、`tests/support/`、`tests/browser/`、`tests/e2e/` 保存不同层级的测试。
+
+模块边界与兼容策略见 [架构](ARCHITECTURE.md)。Agent 扩展见 [提供方接口](AGENT_PROVIDERS.md)。每个功能配套单元测试，新增命令和测试应更新 `tests/features.json`。
+
+## 统一检查
 
 ```sh
-NOTEBRIDGE_TEST_LLDB=1 swift test --package-path native -c release
+uv run python scripts/check.py
+# Mac 上启用实际隔离 LLDB 测试
+uv run python scripts/check.py --lldb
 ```
 
-它验证暂停启动后第一条密钥派生调用、取消及安装失败不放行目标。普通 CI 默认跳过这三项，
-仍会运行暂停启动、进程筛选和脚本顺序测试。测试不重签、不启动、不读取真实微信。
+完整检查包括行与分支覆盖率、Python 单元与集成测试、Swift 测试、DSH 契约测试、界面测试、浏览器完整流程、源码分发与隐私检查。范围、门槛、分层入口和输出报告见 [测试说明](TESTING.md)。
+
+CI 按 PR 执行两组检查，并取消同一 PR 的过期运行。Checks 的触发范围限定为 PR 与手动运行。发行构建按标签或手动启动，保留必要的构建前检查。测试报告保留 7 天。
 
 ## 应用构建
 
 ```sh
 uv run python scripts/build_macos.py
+uv run python scripts/dev.py package-check --backend dist/NoteBridge.app/Contents/Resources/backend/notebridge
 ```
 
 构建 Swift 两个入口，冻结 Python 后端，收集 SQLCipher 与其动态库和许可证，

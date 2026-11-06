@@ -108,7 +108,7 @@ async function action(op, data = {}, title = "正在处理") {
     $("#job-summary").textContent = describeResult(op, result);
     $("#job-result").textContent = JSON.stringify(result, null, 2);
     // Ordinary saves/searches return to the task without an extra acknowledgement.
-    if (!["doctor", "test-dsh", "test-feishu"].includes(op)) dialog.close();
+    if (!["doctor", "test-agent", "test-feishu"].includes(op)) dialog.close();
     if (
       !["connection-check", "capture-start", "capture-login-ready"].includes(op)
     )
@@ -127,10 +127,8 @@ function describeResult(op, value) {
   if (op === "doctor" && value.wechat_data_access?.readable === false)
     return value.wechat_data_access.hint;
   if (value.message || value.hint) return value.message || value.hint;
-  if (op === "connect-dsh")
-    return value.ready
-      ? "DSH 与费用插件已连接，可以继续下一步。"
-      : value.message;
+  if (op === "connect-agent")
+    return value.ready ? "Agent 已连接，可以继续下一步。" : value.message;
   if (op === "auto-connect")
     return value.checks.every((c) => c.ok)
       ? "本机连接已就绪，可以继续下一步。"
@@ -146,13 +144,13 @@ function describeResult(op, value) {
           (value.permission_hint ||
             value.account_hint ||
             "请展开详细结果，检查微信版本、调试器与数据读取权限。");
-  if (op === "test-dsh")
-    return `模型已返回建议；请求工具数：${value.tools}。费用统计：${value.cost_meter?.found ? "已记账" : "尚未找到，请检查 dsh-cost-meter"}。`;
+  if (op === "test-agent")
+    return `模型已返回建议，工具数为 ${value.tool_count}。${value.cost?.recorded ? "用量已记账。" : "当前 Agent 未提供费用记录。"}`;
   if (op === "test-feishu") return "测试消息已发送到选定飞书群，回读验证通过。";
-  if (op === "install-dsh")
+  if (op === "prepare-agent")
     return value.ready
-      ? "桥接插件已就绪，继续使用 DSH 当前默认模型。"
-      : "配置已安装，请检查 DSH 插件状态。";
+      ? "Agent 已就绪，继续使用当前模型配置。"
+      : "请检查 Agent 运行状态。";
   if (op === "verify-key" || value.connected)
     return `已验证 ${value.verified} / ${value.total} 份数据库。`;
   if (op === "backup-key")
@@ -514,7 +512,7 @@ function overview() {
     ["needs_review", "delivery_review", "budget_review"].includes(r.status),
   ).length;
   const cost = records.reduce(
-    (a, r) => a + (r.dsh?.cost_meter?.own?.cost || 0),
+    (a, r) => a + (r.agent?.cost?.amount ?? r.dsh?.cost_meter?.own?.cost ?? 0),
     0,
   );
   const ready =
@@ -524,7 +522,7 @@ function overview() {
   const problem =
     state.services.last_error || state.services.worker?.last_error;
   $("#content").innerHTML =
-    `${problem ? `<p class="error">${escape(problem)}</p>` : ""}<section class="hero"><div><h2>${state.services.running ? "正在关注新消息" : ready ? "一切就绪，随时开始" : "连接微信，开始你的工作流"}</h2><p>${!accountReport?.matches_current ? escape(accountReport?.message || "先完成微信账号连接，再选择会话与接收群。") : "微信新消息会生成回复建议，按设置送到飞书内部群。"}</p></div><div class="actions">${state.services.running ? button("暂停监控", "stop", true) : ready ? button("开始监控", "start", true) : '<button id="open-setup" class="primary">继续接入设置 →</button>'}</div></section><div class="grid">${card("已投递建议", `<div class="metric">${sent}</div><small>最近 100 条任务</small>`)}${card("需要你确认", `<div class="metric">${review}</div><small>模型、预算或投递异常</small>`)}${card("模型费用估算", `<div class="metric">$${cost.toFixed(4)}</div><small>dsh-cost-meter 用量记录</small>`)}</div>${card("当前连接", `<div class="row"><span class="muted">微信账号</span><strong>${escape(accountReport?.current?.label || "尚未识别")}</strong></div><div class="row"><span class="muted">监听会话</span><strong>${escape(accountReport?.matches_current ? settings.group_name || "尚未选择" : "请先连接当前账号")}</strong></div><div class="row"><span class="muted">飞书接收群</span><strong>${escape(settings.feishu_chat_name || "尚未选择")}</strong></div><div class="row"><span class="muted">运行模式</span><strong>${settings.send_enabled ? "自动投递飞书内部群" : "仅保存本地草稿"}</strong></div><div class="actions"><button id="edit-setup" class="text-button">调整连接配置 →</button></div>`)}<div class="section-title"><h2>最近回复建议</h2><button id="open-records" class="text-button">查看全部 →</button></div>${
+    `${problem ? `<p class="error">${escape(problem)}</p>` : ""}<section class="hero"><div><h2>${state.services.running ? "正在关注新消息" : ready ? "一切就绪，随时开始" : "连接微信，开始你的工作流"}</h2><p>${!accountReport?.matches_current ? escape(accountReport?.message || "先完成微信账号连接，再选择会话与接收群。") : "微信新消息会生成回复建议，按设置送到飞书内部群。"}</p></div><div class="actions">${state.services.running ? button("暂停监控", "stop", true) : ready ? button("开始监控", "start", true) : '<button id="open-setup" class="primary">继续接入设置 →</button>'}</div></section><div class="grid">${card("已投递建议", `<div class="metric">${sent}</div><small>最近 100 条任务</small>`)}${card("需要你确认", `<div class="metric">${review}</div><small>模型、预算或投递异常</small>`)}${card("模型费用估算", `<div class="metric">$${cost.toFixed(4)}</div><small>Agent 返回的用量记录</small>`)}</div>${card("当前连接", `<div class="row"><span class="muted">微信账号</span><strong>${escape(accountReport?.current?.label || "尚未识别")}</strong></div><div class="row"><span class="muted">监听会话</span><strong>${escape(accountReport?.matches_current ? settings.group_name || "尚未选择" : "请先连接当前账号")}</strong></div><div class="row"><span class="muted">飞书接收群</span><strong>${escape(settings.feishu_chat_name || "尚未选择")}</strong></div><div class="row"><span class="muted">运行模式</span><strong>${settings.send_enabled ? "自动投递飞书内部群" : "仅保存本地草稿"}</strong></div><div class="actions"><button id="edit-setup" class="text-button">调整连接配置 →</button></div>`)}<div class="section-title"><h2>最近回复建议</h2><button id="open-records" class="text-button">查看全部 →</button></div>${
       records.length
         ? records
             .slice(0, 3)
@@ -706,7 +704,7 @@ function setup() {
   const done = [
     connected,
     connected && !!settings.chat_id,
-    connectionReport?.dsh?.ready === true,
+    connectionReport?.agent?.ready === true,
     connected && !!settings.feishu_chat_id,
     state.services.running,
   ];
@@ -735,12 +733,15 @@ function setup() {
       `<label>搜索群名或会话<div class="field-action"><input id="chat-query" placeholder="例如：文件传输助手" value="${escape(setupDraft["chat-query"] ?? settings.group_name)}"><button id="find-chats">搜索会话</button></div></label><div id="chats" class="choice-list" role="group" aria-label="微信会话搜索结果"></div><p class="selected-value">已选会话：<strong>${escape(settings.group_name || "尚未选择")}</strong></p>` +
       stepFooter(1, 3, "接入模型", !settings.chat_id);
   } else if (setupStep === 3) {
+    const isDsh = !settings.agent_provider || settings.agent_provider === "dsh";
     content =
       heading(
-        "连接你的 DSH 模型",
-        "复用 DSH 中已有的模型渠道，并接入 dsh-cost-meter 记录用量。",
+        "连接你的 Agent",
+        isDsh
+          ? "复用 DSH 中已有的模型渠道，并接入 dsh-cost-meter 记录用量。"
+          : "连接已配置的 Agent，使用统一任务接口生成回复建议。",
       ) +
-      `<p class="muted">先打开 DSH 并配置好模型，再点击下方连接。缺少费用插件时会使用 DSH 自带安装器补齐。</p><div class="actions"><button id="auto-connect" class="primary">连接 DSH 与费用插件</button>${button("测试模型与记账", "test-dsh")}</div><div id="onboarding-checks" class="connection-checks" aria-live="polite"></div><p class="note">连接不会发起模型对话。「测试模型」会产生一次真实调用；最后一步也会统一验证。</p><details class="subsection"><summary>手动维护桥接插件</summary><div class="actions">${button("安装 / 更新桥接插件", "install-dsh")}</div></details>` +
+      `<p class="muted">${isDsh ? "先打开 DSH 并配置好模型。缺少费用插件时会使用 DSH 自带安装器补齐。" : "请启动已配置的 Agent 服务，然后连接。"}</p><div class="actions"><button id="auto-connect" class="primary">连接 Agent</button>${button("测试模型与记账", "test-agent")}</div><div id="onboarding-checks" class="connection-checks" aria-live="polite"></div><p class="note">连接不会发起模型对话。「测试模型」会产生一次真实调用；最后一步也会统一验证。</p><details class="subsection"><summary>手动维护桥接插件</summary><div class="actions">${button("安装 / 更新桥接插件", "prepare-agent")}</div></details>` +
       stepFooter(2, 4, "接入飞书");
   } else if (setupStep === 4) {
     const transport =
@@ -763,7 +764,7 @@ function setup() {
         "确认配置，开始运行",
         "最后验证模型、费用记录和飞书投递，然后监听新消息。",
       ) +
-      `<div class="row"><span class="muted">微信会话</span><strong>${escape(settings.group_name || "尚未选择")}</strong></div><div class="row"><span class="muted">飞书接收群</span><strong>${escape(settings.feishu_chat_name || "尚未选择")}</strong></div><label class="check"><input id="send-enabled" type="checkbox" ${(setupDraft["send-enabled"] ?? settings.send_enabled) ? "checked" : ""}><span><strong>将回复建议自动发送到飞书</strong><small>关闭后仅保存本地草稿。建议内容请人工确认后回复客户。</small></span></label><details class="subsection"><summary>启动方式</summary><label class="check"><input id="autostart-monitor" type="checkbox" ${(setupDraft["autostart-monitor"] ?? settings.autostart_monitor) ? "checked" : ""}><span>打开 NoteBridge 后恢复监控</span></label><label class="check"><input id="login-start" type="checkbox" ${(setupDraft["login-start"] ?? state.login_installed) ? "checked" : ""}><span>登录 Mac 后在菜单栏启动</span></label></details><p class="note">测试会调用一次模型，并向已选飞书群发送一条测试消息。保持 Mac 微信登录、DSH 开启；开启自动投递前，请在工作台检查已有草稿。</p><div class="step-footer"><button id="step-back" class="text-button">← 上一步</button><button id="finish-setup" class="primary" ${accountReport?.matches_current && settings.chat_id && settings.feishu_chat_id ? "" : "disabled"}>测试并开始运行</button></div><div class="actions"><button id="save-run" class="text-button">仅保存运行选项</button></div>`;
+      `<div class="row"><span class="muted">微信会话</span><strong>${escape(settings.group_name || "尚未选择")}</strong></div><div class="row"><span class="muted">飞书接收群</span><strong>${escape(settings.feishu_chat_name || "尚未选择")}</strong></div><label class="check"><input id="send-enabled" type="checkbox" ${(setupDraft["send-enabled"] ?? settings.send_enabled) ? "checked" : ""}><span><strong>将回复建议自动发送到飞书</strong><small>关闭后仅保存本地草稿。建议内容请人工确认后回复客户。</small></span></label><details class="subsection"><summary>启动方式</summary><label class="check"><input id="autostart-monitor" type="checkbox" ${(setupDraft["autostart-monitor"] ?? settings.autostart_monitor) ? "checked" : ""}><span>打开 NoteBridge 后恢复监控</span></label><label class="check"><input id="login-start" type="checkbox" ${(setupDraft["login-start"] ?? state.login_installed) ? "checked" : ""}><span>登录 Mac 后在菜单栏启动</span></label></details><p class="note">测试会调用一次模型，并向已选飞书群发送一条测试消息。保持 Mac 微信登录、Agent 就绪；开启自动投递前，请在工作台检查已有草稿。</p><div class="step-footer"><button id="step-back" class="text-button">← 上一步</button><button id="finish-setup" class="primary" ${accountReport?.matches_current && settings.chat_id && settings.feishu_chat_id ? "" : "disabled"}>测试并开始运行</button></div><div class="actions"><button id="save-run" class="text-button">仅保存运行选项</button></div>`;
   }
   $("#content").innerHTML =
     `<div class="setup-layout"><ol class="steps" aria-label="接入进度">${setupStages.map((name, i) => `<li><button class="step ${setupStep === i + 1 ? "current" : done[i] ? "done" : ""}" data-step="${i + 1}" ${setupStep === i + 1 ? 'aria-current="step"' : ""} ${!connected && i > 0 ? "disabled" : ""}><span class="step-number">${done[i] && setupStep !== i + 1 ? "✓" : i + 1}</span><span>${name}</span></button></li>`).join("")}</ol>${setupStep > 1 ? `<div class="account-strip"><span>配置账号 · ${escape(accountReport.selected?.label)}</span><button id="change-account" class="text-button">管理账号</button></div>` : ""}<section class="card setup-task">${setupStep > 1 ? `<div id="setup-login-status" class="note" ${accountReport?.matches_current ? "hidden" : ""}><p>凭据已保存，可继续配置本地会话。开始监控前，请在官方微信中登录此账号；无需重新取钥。</p><button id="refresh-setup-account" class="text-button">刷新登录状态</button></div>` : ""}${content}</section><p class="setup-help">遇到问题？<a href="https://github.com/CalWade/wx-watcher/blob/main/docs/FIRST_RUN.md" target="_blank" rel="noreferrer">查看接入指南 ↗</a></p></div>`;
@@ -786,10 +787,10 @@ function setup() {
     $("#existing-options").scrollIntoView({ block: "start" });
   });
   bind("auto-connect", async () => {
-    const result = await action("connect-dsh", {}, "连接 DSH 与费用插件");
+    const result = await action("connect-agent", {}, "连接 Agent");
     connectionReport = {
       ...connectionReport,
-      dsh: result,
+      agent: result,
       checks: result.checks || [],
     };
     render();

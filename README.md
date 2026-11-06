@@ -94,22 +94,20 @@ uv run notebridge desktop
 [完整安装步骤](docs/INSTALL.md)。浏览器版与 Mac 应用使用同一界面；Mac 应用额外提供
 原生文件选择和菜单栏。首次权限确认和微信登录仍由本人完成。
 
-## 构建与检查
+## 开发与检查
 
 ```sh
-uv sync --frozen --group build
+uv run python scripts/dev.py bootstrap --native
+uv run python scripts/dev.py accept
+uv run python scripts/check.py --lldb
 uv run python scripts/build_macos.py
-uv run python scripts/verify.py
-swift test --package-path native -c release
-node --test tests/dsh/bridge.test.mjs
-npm ci
-npm test
-uv run python scripts/check_release.py
 ```
 
-应用产物位于 `dist/`，不依赖源码目录。正式 Developer ID 签名和公证需要维护者自己的
-Apple 凭据；临时签名产物必须明确标注，不要求用户关闭系统安全保护。
-自动测试使用合成数据，不需要个人账号或模型密钥。[验收标准](docs/DELIVERY.md)
+一键开发环境使用合成加密数据库与本地协议服务，可以独立启动、注入新消息并验收恢复流程。
+[架构与分层](docs/ARCHITECTURE.md) · [测试与覆盖率](docs/TESTING.md) · [Agent 扩展接口](docs/AGENT_PROVIDERS.md)
+
+应用产物位于 `dist/`。正式 Developer ID 签名和公证需要维护者自己的 Apple 凭据；
+临时签名产物必须明确标注。首次系统授权和真实账号登录由使用者完成。
 
 ## 数据与来源
 

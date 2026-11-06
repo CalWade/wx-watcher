@@ -45,6 +45,8 @@ class FakeDSH:
                 "output": json.dumps(PROPOSAL, ensure_ascii=False),
                 "session_id": "notebridge-" + data["id"],
                 "usage": {"input": 20, "output": 30},
+                "request_tool_count": 0,
+                "cost_meter": {"found": True, "own": {"cost": 0.001}},
             }
             return {"id": data["id"], "status": "queued"}
         return self.jobs[route.rsplit("/", 1)[1]]
@@ -174,7 +176,7 @@ class ReplyPipelineTests(unittest.TestCase):
         task = self.agent.store.tasks()[0]
         self.assertEqual(task["status"], "draft")
         self.assertEqual(task["proposal"], PROPOSAL)
-        self.assertIn("usage", task["dsh"])
+        self.assertIn("usage", task["agent"])
         self.agent.initialize()
         self.agent.tick()
         self.assertEqual(self.fake.post_count, 1)

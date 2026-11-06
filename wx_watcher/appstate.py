@@ -11,6 +11,7 @@ import uuid
 from pathlib import Path
 
 from .branding import app_home, dsh_storage
+from .infrastructure.agents.config import merge_agent_settings, normalize_agent_settings
 from .source import private_dir
 
 
@@ -76,12 +77,12 @@ class AppState:
 
     def load(self) -> dict:
         with self.lock:
-            return json.loads(self.file.read_text())
+            return normalize_agent_settings(json.loads(self.file.read_text()))
 
     def update(self, **values):
         with self.lock:
             settings = self.load()
-            settings.update(values)
+            settings.update(merge_agent_settings(settings, values))
             atomic_json(self.file, settings)
             return settings
 
@@ -196,6 +197,8 @@ class AppState:
                 "state_dir": str(scope / "agent"),
                 "dsh_token_file": str(dsh_storage() / "token"),
                 "dsh_port": state["dsh_port"],
+                "agent_provider": state.get("agent_provider", "dsh"),
+                "agent_options_json": json.dumps(state.get("agent_options", {})),
                 "feishu_chat_id": state["feishu_chat_id"],
                 "feishu_chat_name": state["feishu_chat_name"],
                 "send_enabled": state["send_enabled"],

@@ -13,15 +13,26 @@ from urllib.request import Request, urlopen
 
 
 class Feishu:
-    def __init__(self, transport="cli", app_id="", secret_ref="", cli=""):
+    def __init__(
+        self,
+        transport="cli",
+        app_id="",
+        secret_ref="",
+        cli="",
+        *,
+        api_root="https://open.feishu.cn/open-apis/",
+        secret_reader=None,
+    ):
         self.transport, self.app_id, self.secret_ref = transport, app_id, secret_ref
         self.cli = cli or shutil.which("lark-cli") or "/opt/homebrew/bin/lark-cli"
+        self.api_root = api_root.rstrip("/") + "/"
+        self.secret_reader = secret_reader
         self.token = None
         self.expires_at = 0
         self.lock = threading.Lock()
 
     def _cli(self, args):
-        result = subprocess.run(
+        result = self._run_cli(
             [self.cli, "im", *args, "--as", "bot", "--format", "json"],
             capture_output=True,
             text=True,
@@ -40,6 +51,13 @@ class Feishu:
             raise RuntimeError("飞书调用失败，请检查机器人权限和群成员关系")
         return data
 
+    @staticmethod
+    def _run_cli(*args, **kwargs):
+        try:
+            return subprocess.run(*args, **kwargs)
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("飞书 CLI 响应超时，请检查任务投递状态") from None
+
     def _http(self, route, data=None, *, auth=True):
         raw = (
             json.dumps(data, ensure_ascii=False).encode() if data is not None else None
@@ -50,7 +68,7 @@ class Feishu:
         try:
             with urlopen(
                 Request(
-                    "https://open.feishu.cn/open-apis/" + route,
+                    self.api_root + route,
                     data=raw,
                     headers=headers,
                 ),
@@ -69,10 +87,14 @@ class Feishu:
                 return self.token
             from .credentials import native_request
 
-            secret = native_request(
-                {"operation": "read_secret", "key_ref": self.secret_ref},
-                internal_read=True,
-            )["secret"]
+            secret = (
+                self.secret_reader(self.secret_ref)
+                if self.secret_reader
+                else native_request(
+                    {"operation": "read_secret", "key_ref": self.secret_ref},
+                    internal_read=True,
+                )["secret"]
+            )
             result = self._http(
                 "auth/v3/tenant_access_token/internal",
                 {"app_id": self.app_id, "app_secret": secret},

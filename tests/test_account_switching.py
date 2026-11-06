@@ -206,11 +206,12 @@ class AccountSwitchingTests(unittest.TestCase):
 
     def test_auto_connect_does_not_verify_or_read_the_old_account(self):
         with (
-            patch("wx_watcher.onboarding.prepare_dsh", return_value=None),
+            patch.object(self.c, "agent") as agent,
             patch.object(self.c, "feishu") as feishu,
             patch.object(self.c, "conversations") as conversations,
             patch("wx_watcher.controller.native_request") as native,
         ):
+            agent.return_value.prepare.return_value = {"ready": False}
             feishu.return_value.chats.return_value = {"data": {"chats": []}}
             result = connect_existing(self.c)
         native.assert_not_called()

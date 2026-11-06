@@ -42,6 +42,7 @@ class OnboardingTests(unittest.TestCase):
         self.c.accounts = Mock(side_effect=AssertionError("unrelated account step"))
         self.c.feishu = Mock(side_effect=AssertionError("unrelated destination step"))
         self.c.install_dsh = Mock(return_value={"ready": True})
+        self.c.dsh = Mock(side_effect=AssertionError("client read before preparation"))
         with patch(
             "wx_watcher.onboarding.prepare_dsh", return_value={"installed": True}
         ):
@@ -50,6 +51,7 @@ class OnboardingTests(unittest.TestCase):
         self.assertTrue(all(c["ok"] for c in result["checks"]))
         self.c.accounts.assert_not_called()
         self.c.feishu.assert_not_called()
+        self.c.dsh.assert_not_called()
 
     def test_changed_feishu_transport_cannot_keep_the_old_destination(self):
         self.c.services.running = Mock(return_value=False)
@@ -78,10 +80,11 @@ class OnboardingTests(unittest.TestCase):
         self.assertFalse(result["checks"][0]["ok"])
         self.assertEqual(len(result["feishu_chats"]), 1)
         self.assertTrue(result["dsh"]["ready"])
+        self.assertTrue(result["cost_meter"]["installed"])
 
     def test_failed_model_isolation_stops_before_feishu_or_service_start(self):
         def perform(operation, data):
-            if operation == "test-dsh":
+            if operation == "test-agent":
                 return {"tools": 1, "cost_meter": {"found": True}}
             return {"ok": True, "all_verified": True}
 
@@ -93,21 +96,21 @@ class OnboardingTests(unittest.TestCase):
 
     def test_missing_cost_record_stops_before_delivery(self):
         def perform(operation, data):
-            return (
-                {"tools": 0, "cost_meter": {"found": False}}
-                if operation == "test-dsh"
-                else {"all_verified": True}
-            )
+            if operation == "test-agent":
+                raise RuntimeError("Agent 费用记录检查未通过")
+            return {"all_verified": True}
 
         with patch.object(self.c, "perform", side_effect=perform) as call:
-            with self.assertRaises(RuntimeError):
+            with self.assertRaisesRegex(RuntimeError, "费用记录"):
                 self.c._perform("finish-setup", {})
-        self.assertNotIn("test-feishu", [v.args[0] for v in call.call_args_list])
+        self.assertNotIn(
+            "test-feishu", [value.args[0] for value in call.call_args_list]
+        )
 
     def test_full_check_runs_in_order_and_starts_only_after_readback(self):
         def perform(operation, data):
             return {
-                "tools": 0,
+                "tool_count": 0,
                 "cost_meter": {"found": True},
                 "readback": True,
                 "running": True,
@@ -118,6 +121,6 @@ class OnboardingTests(unittest.TestCase):
             result = self.c._perform("finish-setup", {})
         self.assertEqual(
             [v.args[0] for v in call.call_args_list],
-            ["run-settings", "verify-key", "test-dsh", "test-feishu", "start"],
+            ["run-settings", "verify-key", "test-agent", "test-feishu", "start"],
         )
         self.assertTrue(result["running"])

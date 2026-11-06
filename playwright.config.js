@@ -4,7 +4,6 @@ module.exports = defineConfig({
   use: {
     baseURL: "http://127.0.0.1:19767",
     browserName: "chromium",
-    channel: process.env.CI ? undefined : "chrome",
   },
   webServer: {
     command: "uv run python scripts/test_console_server.py",

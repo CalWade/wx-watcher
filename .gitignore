@@ -25,3 +25,7 @@ node_modules/
 playwright-report/
 test-results/
 .ruff_cache/
+
+.coverage
+.coverage.*
+htmlcov/

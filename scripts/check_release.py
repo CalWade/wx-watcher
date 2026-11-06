@@ -23,6 +23,10 @@ REQUIRED = [
     "docs/OPERATIONS.md",
     "docs/API.md",
     "docs/DEVELOPMENT.md",
+    "docs/ARCHITECTURE.md",
+    "docs/TESTING.md",
+    "docs/AGENT_PROVIDERS.md",
+    "tests/features.json",
     "native/Vendor/LICENSE.greenbubbles",
 ]
 PRIVATE = {

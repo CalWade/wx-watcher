@@ -1,0 +1,353 @@
+{
+  "schema_version": 1,
+  "features": [
+    {
+      "id": "accounts",
+      "title": "账号识别、显示名称、切换和会话选择",
+      "commands": [
+        "accounts",
+        "account-status",
+        "account-name",
+        "refresh-account-name",
+        "conversations"
+      ],
+      "unit": [
+        "unit.test_application.AccountsUseCaseTests.test_account_actions_only_use_display_and_catalog_ports",
+        "unit.test_application.AccountsUseCaseTests.test_absent_login_allows_configuration_and_different_login_requires_switch",
+        "unit.test_application.AccountsUseCaseTests.test_permission_or_ambiguous_identity_preserves_saved_credential",
+        "unit.test_application.AccountsUseCaseTests.test_saved_other_login_requires_explicit_verified_switch",
+        "unit.test_domain.AccountRulesTests.test_readiness_requires_saved_data_and_unambiguous_identity",
+        "unit.test_domain.AccountRulesTests.test_local_configuration_and_live_monitoring_have_distinct_guards",
+        "unit.test_domain.AccountRulesTests.test_names_fall_back_and_never_change_identity"
+      ],
+      "integration": [
+        "tests/test_account_names.py",
+        "tests/test_account_switching.py"
+      ],
+      "browser": [
+        "tests/browser/accounts.spec.js"
+      ],
+      "native_unit": [],
+      "manual": ""
+    },
+    {
+      "id": "credentials",
+      "title": "凭据导入、验证与加密备份",
+      "commands": [
+        "import-key",
+        "verify-key",
+        "backup-key",
+        "restore-key"
+      ],
+      "unit": [
+        "unit.test_application.CredentialsUseCaseTests.test_import_verify_backup_restore_use_only_credential_port",
+        "unit.test_application.CredentialsUseCaseTests.test_running_reader_blocks_credential_changes_before_access",
+        "unit.test_application.CredentialsUseCaseTests.test_capture_actions_delegate_and_preserve_completed_account_binding",
+        "unit.test_credential_adapter.CredentialAdapterTests.test_explicit_native_tool_is_resolved_without_process_execution",
+        "unit.test_credential_adapter.CredentialAdapterTests.test_secret_payloads_only_cross_the_private_pipe_and_errors_are_bounded",
+        "unit.test_credential_adapter.CredentialAdapterTests.test_reference_reads_validate_key_length_and_hex",
+        "unit.test_credential_adapter.CredentialAdapterTests.test_capture_jobs_keep_the_native_helpers_canonical_location_with_custom_data"
+      ],
+      "integration": [
+        "tests/test_desktop.py"
+      ],
+      "browser": [
+        "tests/browser/first_run.spec.js"
+      ],
+      "native_unit": [
+        "native/Tests/NoteBridgeAccessTests/KeytoolTests.swift::encryptedBackupsRoundTripAndRejectWrongPasswordOrTampering"
+      ],
+      "manual": ""
+    },
+    {
+      "id": "capture",
+      "title": "取钥向导、取消和官方客户端恢复",
+      "commands": [
+        "capture-preflight",
+        "capture-start",
+        "capture-status",
+        "capture-cancel",
+        "capture-recover",
+        "capture-sessions",
+        "capture-login-ready",
+        "connection-check"
+      ],
+      "unit": [
+        "unit.test_application.CredentialsUseCaseTests.test_import_verify_backup_restore_use_only_credential_port",
+        "unit.test_application.CredentialsUseCaseTests.test_running_reader_blocks_credential_changes_before_access",
+        "unit.test_application.CredentialsUseCaseTests.test_capture_actions_delegate_and_preserve_completed_account_binding"
+      ],
+      "integration": [
+        "tests/test_keyflow.py",
+        "tests/test_first_connection.py"
+      ],
+      "browser": [
+        "tests/browser/first_run.spec.js"
+      ],
+      "native_unit": [
+        "native/Tests/NoteBridgeAccessTests/KeytoolTests.swift::loginPageGateHonorsConfirmationCancellationAndDeadline",
+        "native/Tests/NoteBridgeAccessTests/CaptureAccountTests.swift::firstLoginWaitsForDirectoryAndCompletePageWithoutWritingSource"
+      ],
+      "manual": "真实微信登录、系统授权、重签恢复在本人操作的 Mac 上验收，CI 使用隔离测试程序和合成账号。"
+    },
+    {
+      "id": "settings",
+      "title": "配置验证、账号隔离与登录启动",
+      "commands": [
+        "settings",
+        "run-settings",
+        "login-service",
+        "feishu-secret"
+      ],
+      "unit": [
+        "unit.test_application.SettingsUseCaseTests.test_settings_are_validated_before_credentials_or_persistence",
+        "unit.test_application.SettingsUseCaseTests.test_verified_switch_clears_cross_account_options",
+        "unit.test_application.SettingsUseCaseTests.test_failed_verification_and_pending_agent_work_cannot_change_selection",
+        "unit.test_application.SettingsUseCaseTests.test_delivery_identity_change_clears_destination_and_saves_secret_reference",
+        "unit.test_application.SettingsUseCaseTests.test_run_settings_and_login_service_use_explicit_ports",
+        "unit.test_domain.SettingsRulesTests.test_invalid_changes_are_rejected_before_mutation",
+        "unit.test_domain.SettingsRulesTests.test_known_settings_are_copied_and_profile_switch_is_explicit"
+      ],
+      "integration": [
+        "tests/test_desktop.py",
+        "tests/test_branding_migration.py"
+      ],
+      "browser": [
+        "tests/browser/console.spec.js"
+      ],
+      "native_unit": [],
+      "manual": ""
+    },
+    {
+      "id": "agent",
+      "title": "Agent 连接、任务协议和模型验证",
+      "commands": [
+        "connect-agent",
+        "prepare-agent",
+        "agent-status",
+        "test-agent",
+        "auto-connect"
+      ],
+      "unit": [
+        "unit.test_application.ConnectionsUseCaseTests.test_prepare_status_and_test_only_need_the_agent_port",
+        "unit.test_application.ConnectionsUseCaseTests.test_agent_isolation_cost_output_failure_and_timeout_are_actionable",
+        "unit.test_application.ConnectionsUseCaseTests.test_delivery_test_requires_destination_and_exact_readback",
+        "unit.test_application.ConnectionsUseCaseTests.test_running_services_reject_preparation_before_external_calls",
+        "unit.test_providers.AgentProviderTests.test_dsh_translation_is_confined_to_its_adapter",
+        "unit.test_providers.AgentProviderTests.test_neutral_http_provider_uses_the_same_job_contract",
+        "unit.test_providers.AgentProviderTests.test_registry_is_explicit_validates_options_and_copies_mutable_settings",
+        "unit.test_providers.AgentProviderTests.test_legacy_tasks_keep_provider_and_execution_identity"
+      ],
+      "integration": [
+        "tests/test_onboarding.py",
+        "tests/test_full_pipeline.py"
+      ],
+      "browser": [
+        "tests/e2e/pipeline.spec.js"
+      ],
+      "native_unit": [],
+      "manual": "真实 DSH 模型渠道与费用账本需要本机已配置模型。自动验收使用本地协议服务。"
+    },
+    {
+      "id": "delivery",
+      "title": "飞书群选择、投递与精确回读",
+      "commands": [
+        "feishu-chats",
+        "test-feishu"
+      ],
+      "unit": [
+        "unit.test_application.ConnectionsUseCaseTests.test_prepare_status_and_test_only_need_the_agent_port",
+        "unit.test_application.ConnectionsUseCaseTests.test_agent_isolation_cost_output_failure_and_timeout_are_actionable",
+        "unit.test_application.ConnectionsUseCaseTests.test_delivery_test_requires_destination_and_exact_readback",
+        "unit.test_application.ConnectionsUseCaseTests.test_running_services_reject_preparation_before_external_calls",
+        "unit.test_worker.ReplyWorkerUnitTests.test_embedded_provider_generates_a_draft_without_a_client_specific_dependency",
+        "unit.test_worker.ReplyWorkerUnitTests.test_history_is_baselined_and_restarts_poll_the_original_job",
+        "unit.test_worker.ReplyWorkerUnitTests.test_changing_provider_or_account_cannot_reuse_pending_execution",
+        "unit.test_worker.ReplyWorkerUnitTests.test_non_questions_and_self_messages_do_not_submit_agent_jobs",
+        "unit.test_worker.ReplyWorkerUnitTests.test_batching_commits_one_task_and_survives_worker_reinitialization",
+        "unit.test_worker.ReplyWorkerUnitTests.test_daily_budget_invalid_output_and_agent_failure_require_review",
+        "unit.test_worker.ReplyWorkerUnitTests.test_delivery_permissions_uncertainty_and_crash_recovery_are_explicit",
+        "unit.test_worker.ReplyWorkerUnitTests.test_another_jobs_result_cannot_advance_the_task_or_reach_delivery"
+      ],
+      "integration": [
+        "tests/test_feishu.py",
+        "tests/test_full_pipeline.py"
+      ],
+      "browser": [
+        "tests/e2e/pipeline.spec.js"
+      ],
+      "native_unit": [],
+      "manual": "真实飞书租户授权与目标群由使用者配置，自动验收使用本地 OpenAPI 服务。"
+    },
+    {
+      "id": "runtime",
+      "title": "完成接入、启动、停止与运行诊断",
+      "commands": [
+        "finish-setup",
+        "start",
+        "stop",
+        "doctor",
+        "diagnostics"
+      ],
+      "unit": [
+        "unit.test_application.RuntimeUseCaseTests.test_finish_setup_uses_generic_agent_and_starts_after_verified_delivery",
+        "unit.test_application.RuntimeUseCaseTests.test_invalid_credentials_stop_before_model_or_delivery",
+        "unit.test_application.RuntimeUseCaseTests.test_start_checks_account_and_migration_agent_readiness"
+      ],
+      "integration": [
+        "tests/test_supervisor.py",
+        "tests/test_full_pipeline.py"
+      ],
+      "browser": [
+        "tests/e2e/pipeline.spec.js"
+      ],
+      "native_unit": [],
+      "manual": ""
+    },
+    {
+      "id": "collection",
+      "title": "本地数据库、WAL、基线、水位与保留期",
+      "commands": [],
+      "unit": [
+        "unit.test_collection.MessageCollectorUnitTests.test_baseline_and_live_reads_use_distinct_limits_and_atomic_commits",
+        "unit.test_collection.MessageCollectorUnitTests.test_shard_failure_cannot_commit_a_partial_scan_or_advance_baseline",
+        "unit.test_collection.MessageCollectorUnitTests.test_missing_shards_and_retention_use_explicit_clock"
+      ],
+      "integration": [
+        "tests/test_pipeline.py",
+        "tests/test_retention.py"
+      ],
+      "browser": [
+        "tests/e2e/pipeline.spec.js"
+      ],
+      "native_unit": [],
+      "manual": ""
+    },
+    {
+      "id": "replies",
+      "title": "建议生成、合并、预算、幂等和重启恢复",
+      "commands": [],
+      "unit": [
+        "unit.test_worker.ReplyWorkerUnitTests.test_embedded_provider_generates_a_draft_without_a_client_specific_dependency",
+        "unit.test_worker.ReplyWorkerUnitTests.test_history_is_baselined_and_restarts_poll_the_original_job",
+        "unit.test_worker.ReplyWorkerUnitTests.test_changing_provider_or_account_cannot_reuse_pending_execution",
+        "unit.test_worker.ReplyWorkerUnitTests.test_non_questions_and_self_messages_do_not_submit_agent_jobs",
+        "unit.test_worker.ReplyWorkerUnitTests.test_batching_commits_one_task_and_survives_worker_reinitialization",
+        "unit.test_worker.ReplyWorkerUnitTests.test_daily_budget_invalid_output_and_agent_failure_require_review",
+        "unit.test_worker.ReplyWorkerUnitTests.test_delivery_permissions_uncertainty_and_crash_recovery_are_explicit",
+        "unit.test_domain.ReplyRulesTests.test_model_schema_rejects_malformed_and_unbounded_results",
+        "unit.test_domain.ReplyRulesTests.test_prompt_filters_future_and_duplicate_messages_and_bounds_context",
+        "unit.test_domain.ReplyRulesTests.test_agent_contract_rejects_invalid_jobs_and_tool_execution",
+        "unit.test_worker.ReplyWorkerUnitTests.test_another_jobs_result_cannot_advance_the_task_or_reach_delivery"
+      ],
+      "integration": [
+        "tests/test_reply.py",
+        "tests/test_full_pipeline.py"
+      ],
+      "browser": [
+        "tests/e2e/pipeline.spec.js"
+      ],
+      "native_unit": [],
+      "manual": ""
+    },
+    {
+      "id": "review",
+      "title": "人工重试、投递不确定性与游标重建",
+      "commands": [
+        "task-review",
+        "reset-cursor"
+      ],
+      "unit": [
+        "unit.test_application.TaskUseCaseTests.test_review_and_cursor_reset_respect_runtime_state_and_confirmation",
+        "unit.test_application.TaskUseCaseTests.test_every_application_group_rejects_unknown_operations",
+        "unit.test_domain.TaskRulesTests.test_review_requires_confirmation_and_preserves_original_until_commit",
+        "unit.test_domain.TaskRulesTests.test_model_retry_creates_a_new_bound_task_without_old_execution_state"
+      ],
+      "integration": [
+        "tests/test_task_review.py"
+      ],
+      "browser": [
+        "tests/browser/console.spec.js"
+      ],
+      "native_unit": [],
+      "manual": ""
+    },
+    {
+      "id": "knowledge",
+      "title": "本地业务资料检索和可追溯来源",
+      "commands": [],
+      "unit": [
+        "unit.test_knowledge.KnowledgeTests.test_selection_is_bounded_and_records_sources",
+        "unit.test_knowledge.KnowledgeTests.test_no_symlink_or_binary_knowledge"
+      ],
+      "integration": [
+        "tests/test_reply.py"
+      ],
+      "browser": [
+        "tests/browser/console.spec.js"
+      ],
+      "native_unit": [],
+      "manual": ""
+    },
+    {
+      "id": "desktop",
+      "title": "本地界面、导航和原生桥接边界",
+      "commands": [],
+      "unit": [
+        "unit.test_http_server.LoopbackServerUnitTests.test_binding_uses_the_assigned_numeric_address_without_reverse_dns"
+      ],
+      "integration": [
+        "tests/test_desktop.py"
+      ],
+      "browser": [
+        "tests/browser/layout.spec.js"
+      ],
+      "native_unit": [
+        "native/Tests/NoteBridgeDesktopDomainTests/TrustedInterfaceTests.swift::onlyAnExplicitLoopbackHttpOriginCanOwnTheInterface",
+        "native/Tests/NoteBridgeDesktopDomainTests/TrustedInterfaceTests.swift::navigationAndBridgeMessagesStayWithinTheSameOrigin",
+        "native/Tests/NoteBridgeDesktopDomainTests/TrustedInterfaceTests.swift::nativeRequestsHaveBoundedKnownKindsAndSafeIdentifiers"
+      ],
+      "manual": "新机器完整磁盘访问、菜单栏与系统选择器需要 Mac 原生界面验收。"
+    },
+    {
+      "id": "environment",
+      "title": "开发环境、一键启动和统一验收",
+      "commands": [],
+      "unit": [
+        "unit.test_dev_tools.EnvironmentToolTests.test_doctor_reports_missing_tools_before_running_any_installation",
+        "unit.test_dev_tools.EnvironmentToolTests.test_bootstrap_uses_project_lock_files_and_installs_browser_runtime",
+        "unit.test_dev_tools.EnvironmentToolTests.test_missing_package_manager_produces_an_actionable_bootstrap_result",
+        "unit.test_dev_tools.EnvironmentToolTests.test_check_plan_has_each_test_layer_and_a_failure_stops_later_stages",
+        "unit.test_dev_tools.EnvironmentToolTests.test_missing_node_is_reported_before_installing_other_dependencies",
+        "unit.test_dev_tools.EnvironmentToolTests.test_package_check_rejects_an_unavailable_backend_before_starting_processes",
+        "unit.test_dev_tools.EnvironmentToolTests.test_failure_logs_are_bounded_and_saved_in_the_private_report_directory"
+      ],
+      "integration": [
+        "tests/test_full_pipeline.py"
+      ],
+      "browser": [
+        "tests/e2e/pipeline.spec.js"
+      ],
+      "native_unit": [],
+      "manual": ""
+    },
+    {
+      "id": "architecture",
+      "title": "分层和 Agent 无关的依赖规则",
+      "commands": [],
+      "unit": [
+        "unit.test_architecture.ArchitectureTests.test_domain_has_no_application_or_infrastructure_dependencies",
+        "unit.test_architecture.ArchitectureTests.test_application_only_depends_on_domain_and_application_ports",
+        "unit.test_architecture.ArchitectureTests.test_agent_business_code_has_no_provider_names_or_wire_fields",
+        "unit.test_feature_contract.FeatureContractTests.test_all_application_commands_have_one_feature_owner_and_unit_evidence",
+        "unit.test_feature_contract.FeatureContractTests.test_integration_browser_and_native_evidence_resolves_to_repository_tests"
+      ],
+      "integration": [
+        "tests/test_full_pipeline.py"
+      ],
+      "browser": [],
+      "native_unit": [],
+      "manual": ""
+    }
+  ]
+}

@@ -1,3 +1,4 @@
+import NoteBridgeDesktopDomain
 import AppKit
 import WebKit
 import Darwin
@@ -131,7 +132,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             return
         }
         let env = ProcessInfo.processInfo.environment
-        if let override = env["NOTE_BRIDGE_UI_URL"] ?? env["WX_WATCHER_UI_URL"], let url = URL(string: override) {
+        if let override = env["NOTE_BRIDGE_UI_URL"] ?? env["WX_WATCHER_UI_URL"], let url = URL(string: override), TrustedInterface(url: url) != nil {
             baseURL = URL(string: "\(url.scheme ?? "http")://\(url.host ?? "127.0.0.1"):\(url.port ?? 80)")
             web.load(URLRequest(url: url)); return
         }
@@ -165,7 +166,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
                     self.outputBuffer.removeSubrange(...newline)
                     if let json = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
                        let value = json["desktop_url"] as? String, let url = URL(string: value),
-                       url.host == "127.0.0.1", url.scheme == "http" {
+                       TrustedInterface(url: url) != nil {
                         self.baseURL = URL(string: "http://127.0.0.1:\(url.port ?? 8767)")
                         self.web.load(URLRequest(url: url))
                         if json["reused"] as? Bool != true {
@@ -255,7 +256,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
                  decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void) {
         guard let url = navigationAction.request.url else { decisionHandler(.cancel); return }
-        if url.scheme == "about" || (url.host == "127.0.0.1" && url.port == baseURL?.port) {
+        let isPlaceholder = url.absoluteString == "about:blank"
+        let allowedOrigin = baseURL.flatMap { TrustedInterface(url: $0) }?.allowsNavigation(to: url) ?? false
+        if isPlaceholder || allowedOrigin {
             decisionHandler(.allow)
         } else {
             if url.scheme == "https" { NSWorkspace.shared.open(url) }
@@ -263,12 +266,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         }
     }
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-        guard message.frameInfo.isMainFrame,
-              message.frameInfo.securityOrigin.host == "127.0.0.1",
-              message.frameInfo.securityOrigin.port == baseURL?.port,
-              let request = message.body as? [String: Any],
-              let kind = request["kind"] as? String, let id = request["id"] as? String,
-              id.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" }) else { return }
+        guard let baseURL, let trusted = TrustedInterface(url: baseURL),
+              trusted.accepts(scheme: message.frameInfo.securityOrigin.protocol,
+                              host: message.frameInfo.securityOrigin.host,
+                              port: message.frameInfo.securityOrigin.port,
+                              mainFrame: message.frameInfo.isMainFrame),
+              let request = NativeInterfaceRequest(body: message.body) else { return }
+        let kind = request.kind.rawValue
+        let id = request.id
         if kind == "open-app-management" {
             showPermissionHelp()
             NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AppBundles")!)

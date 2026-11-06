@@ -56,3 +56,7 @@ Bearer 认证，默认 8766：
 账号名称的内部管理操作：`POST /api/action/account-name` 接收 `{db_root, label}`，只更新已发现或已保存账号的本地备注；空 `label` 清除备注。`POST /api/action/refresh-account-name` 接收 `{db_root}`，读取已保存凭据所对应的本人昵称与微信号。两者均按数据库目录定位，不用昵称或备注作为账号身份。显示元数据缓存于私有设置文件；账号列表只读缓存，不触发钥匙串读取。
 
 `account-status` 将 `can_configure`（可继续配置所选本地账号）与 `matches_current`（已确认微信当前登录与所选账号一致）分开返回。已保存凭据且本地资料可用、没有已确认的其他登录账号时，可以搜索和选择会话；这不代表已登录，也不授权开始监控。`start` 和 `finish-setup` 仍检查当前登录账号；后台监控在登录身份丢失或变化时暂停。
+
+## Agent 扩展边界
+
+模型连接使用 `connect-agent`、`prepare-agent`、`agent-status`、`test-agent` 操作。设置保存 `agent_provider` 与 `agent_options`，具体协议和凭据文件由适配器管理。旧 DSH 操作名保留兼容映射。完整任务协议与内嵌扩展方式见 [Agent 接入](AGENT_PROVIDERS.md)。

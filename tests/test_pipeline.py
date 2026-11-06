@@ -18,14 +18,16 @@ import zstandard
 
 from wx_watcher.api import create_server
 from wx_watcher.collector import Collector
-from wx_watcher.config import Config
+from wx_watcher.config import Config, default_sqlcipher
+from wx_watcher.infrastructure.sqlcipher import library_available, library_path
 from wx_watcher.store import Store
 
 CHAT = "123456@chatroom"
 GROUP = "客户服务测试群"
 TABLE = "Msg_" + hashlib.md5(CHAT.encode()).hexdigest()
 MASTER = bytes(range(32))
-LIBRARY = Path("/opt/homebrew/opt/sqlcipher/lib/libsqlcipher.dylib")
+
+LIBRARY = library_path()
 
 
 class NativeDB:
@@ -63,7 +65,7 @@ class NativeDB:
 
 class PlainDB:
     def __init__(self, path):
-        self.conn = sqlite3.connect(path)
+        self.conn = sqlite3.connect(path, check_same_thread=False)
         self.conn.executescript(
             "PRAGMA page_size=4096; PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0;"
         )
@@ -89,6 +91,7 @@ class Fixture:
             db_root=self.root,
             key_file=key,
             state_dir=base / "state",
+            sqlcipher=default_sqlcipher(),
             group_name=GROUP,
             backend="sqlcipher" if encrypted else "sqlite",
         )
@@ -355,7 +358,7 @@ class PipelineTests(unittest.TestCase):
         )
 
 
-@unittest.skipUnless(LIBRARY.exists(), "真实 SQLCipher 动态库未安装")
+@unittest.skipUnless(library_available(), "真实 SQLCipher 动态库未安装")
 class EncryptedPipelineTests(PipelineTests):
     encrypted = True
 

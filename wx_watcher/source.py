@@ -147,6 +147,13 @@ class SnapshotReader:
             output = output[3:].lstrip()
         return json.loads(output) if output else []
 
+    def close(self):
+        with self._lock:
+            self._master = None
+            self._master_signature = None
+            self._keys.clear()
+            self._fingerprints.clear()
+
 
 class WeChatSource:
     def __init__(self, config: Config):
@@ -159,7 +166,7 @@ class WeChatSource:
     def resolve(self) -> str:
         if self.chat_id:
             return self.chat_id
-        self.root = discover_root(self.config.db_root)
+        self.root = discover_root(self.config.db_root).resolve()
         if self.config.chat_id == "filehelper":
             self.chat_id = "filehelper"
             self.display_name = "文件传输助手"

@@ -16,14 +16,16 @@ jobs:
           python-version: '3.12'
       - run: brew install sqlcipher
       - run: uv sync --frozen --group build
-      - run: uv run python scripts/verify.py
+      - run: uv run python scripts/verify.py --coverage
       - run: swift test --package-path native -c release
       - run: uv run python scripts/check_release.py
       - run: uv run python scripts/build_macos.py
+      - run: uv run python scripts/dev.py package-check --backend dist/NoteBridge.app/Contents/Resources/backend/notebridge
       - run: uv run python scripts/check_release.py dist/*.zip
       - uses: actions/upload-artifact@v4
         with:
           name: notebridge-macos-arm64
+          retention-days: 7
           path: |
             dist/*.zip
             dist/*.dmg

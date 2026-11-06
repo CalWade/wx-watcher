@@ -11,6 +11,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from .collector import Collector
+from .infrastructure.http_server import LoopbackHTTPServer
 from .source import private_dir
 from .store import CursorExpired, Store
 
@@ -105,6 +106,6 @@ def create_server(
 
         do_POST = do_PUT = do_PATCH = do_DELETE = deny
 
-    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    server = LoopbackHTTPServer(("127.0.0.1", port), Handler)
     server.daemon_threads = True
     return server

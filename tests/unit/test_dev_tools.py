@@ -8,6 +8,21 @@ from scripts import check, dev
 
 
 class EnvironmentToolTests(unittest.TestCase):
+    def test_failure_logs_are_bounded_and_saved_in_the_private_report_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            source = directory / "synthetic-child"
+            source.mkdir()
+            (source / "server.log").write_bytes(b"x" * 140000)
+            with patch.object(dev, "ROOT", directory / "project"):
+                dev.retain_failure_logs(source)
+            saved = (
+                directory
+                / "project/output/checks/development-failures/synthetic-child/server.log"
+            )
+            self.assertEqual(len(saved.read_bytes()), 128000)
+            self.assertEqual(saved.stat().st_mode & 0o777, 0o600)
+
     def test_package_check_rejects_an_unavailable_backend_before_starting_processes(
         self,
     ):

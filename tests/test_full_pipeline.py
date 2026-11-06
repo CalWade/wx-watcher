@@ -1,11 +1,14 @@
 """Real processes, encrypted WAL, API, worker and two local HTTP peers."""
 
+import os
 import unittest
+from unittest.mock import patch
 
 from scripts.dev import acceptance, retain_failure_logs
 
 
 class FullApplicationIntegrationTests(unittest.TestCase):
+    @patch.dict(os.environ, {"PYTHONVERBOSE": "1"})
     def test_fresh_environment_delivers_a_new_event_and_restarts_without_duplicates(
         self,
     ):
@@ -18,6 +21,7 @@ class FullApplicationIntegrationTests(unittest.TestCase):
 
 
 class ProductionProcessIntegrationTests(unittest.TestCase):
+    @patch.dict(os.environ, {"PYTHONVERBOSE": "1"})
     def test_real_reader_and_worker_processes_resume_a_bound_agent_task(self):
         import tempfile
         import time

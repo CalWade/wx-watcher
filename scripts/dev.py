@@ -234,6 +234,13 @@ def up(port, encrypted=True, *, register=True):
             time.sleep(0.1)
         raise RuntimeError("验收服务启动超时")
     except BaseException:
+        diagnostic = subprocess.run(
+            ["/bin/ps", "-p", str(process.pid), "-o", "stat=,command="],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        (directory / "startup.log").write_text(diagnostic.stdout[-2000:])
         process.terminate()
         process.wait(timeout=20)
         OWNED_PROCESSES.pop(process.pid, None)

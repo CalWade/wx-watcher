@@ -47,6 +47,20 @@ class AgentProviderTests(unittest.TestCase):
         wire.response = {"id": "another"}
         with self.assertRaises(ValueError):
             gateway.poll("one")
+        connections = []
+
+        def connect():
+            connections.append(True)
+            return WireClient({"ready": True})
+
+        fresh = DshGateway(prepare=lambda: {"ready": True}, client_factory=connect)
+        self.assertTrue(fresh.prepare()["ready"])
+        self.assertEqual(connections, [])
+        self.assertTrue(fresh.status()["ready"])
+        self.assertTrue(fresh.status()["ready"])
+        self.assertEqual(connections, [True])
+        with self.assertRaises(RuntimeError):
+            DshGateway().status()
 
     def test_neutral_http_provider_uses_the_same_job_contract(self):
         job = AgentJob("one", "http", "completed", output=PROPOSAL, tool_count=0)

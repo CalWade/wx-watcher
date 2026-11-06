@@ -64,9 +64,11 @@ class ArchitectureTests(unittest.TestCase):
                         )
 
     def test_agent_business_code_has_no_provider_names_or_wire_fields(self):
+        files = [ROOT / "wx_watcher/services.py"]
         for layer in ("domain", "application"):
-            for file in (ROOT / "wx_watcher" / layer).glob("*.py"):
-                text = file.read_text().lower()
-                with self.subTest(file=str(file.relative_to(ROOT))):
-                    for value in ("dsh", "cost_meter", "session_id", "/v1/jobs"):
-                        self.assertNotIn(value, text)
+            files.extend((ROOT / "wx_watcher" / layer).glob("*.py"))
+        for file in files:
+            text = file.read_text().lower()
+            with self.subTest(file=str(file.relative_to(ROOT))):
+                for value in ("dsh", "cost_meter", "session_id", "/v1/jobs"):
+                    self.assertNotIn(value, text)

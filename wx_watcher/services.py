@@ -90,7 +90,7 @@ class Services:
         self._spawn("worker", command("reply", "--config", str(reply), "run"))
         time.sleep(0.2)
         if self.children["worker"].poll() is not None:
-            raise RuntimeError("回复服务启动失败，请检查 DSH 连接与配置")
+            raise RuntimeError("回复服务启动失败，请检查 Agent 连接与配置")
         self.started_at = time.time()
         self.expected_running = True
         atomic_json(
